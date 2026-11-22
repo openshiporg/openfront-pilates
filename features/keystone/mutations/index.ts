@@ -85,6 +85,7 @@ import { importMemberContacts } from './portableData';
 import { retailTypeDefs, retailWorkspace, retailSaleItems, saveRetailItem, quoteRetailSale, sellRetail, returnRetail, closeRetail } from './retailLifecycle';
 import { counterPaymentTypeDefs, reconcileCounterPayment } from './counterPayments';
 import { completeDropInCheckout, dropInTypeDefs, startDropInCheckout } from './dropIn';
+import { roomTypeDefs, classAvailability, roomsWorkspace, joinWaitlist, leaveWaitlist, changeBookingSpot, saveRoomLayout, setSpotOutOfService, promoteWaitlistBooking } from './rooms';
 import { confirmGiftCardOrder, giftCardOptions, giftCardTypeDefs, giftCardsWorkspace, lookupGiftCard, redeemGiftCard, refundGiftCard, startGiftCardCheckout } from './giftCards';
 import { beginStaffIntent, getMyPendingStaffIntents, getStaffIntent, settleStaffIntent, staffIntentTypeDefs } from './staffIntents';
 import { coachProfileTypeDefs, createCoachProfile, eligibleCoachAccounts } from './coachProfiles';
@@ -269,7 +270,7 @@ export function extendGraphqlSchema(baseSchema: GraphQLSchema) {
         saveStudioClassInstance(id: ID, data: JSON!): ClassInstance
         replayPaymentEvent(eventId: ID!): JSON!
         runOperationsCommand(command: String!, data: JSON!): JSON!
-        bookClass(classInstanceId: ID!, memberId: ID!): BookClassResult!
+        bookClass(classInstanceId: ID!, spotId: ID, memberId: ID, idempotencyKey: String): BookClassResult!
         promoteFromWaitlist(classInstanceId: ID!): PromoteResult!
         cancelClassBooking(bookingId: ID!): BookingCancellationResult!
         cancelClassInstance(classInstanceId: ID!, reason: String!): ClassInstanceCancellationResult!
@@ -359,6 +360,10 @@ export function extendGraphqlSchema(baseSchema: GraphQLSchema) {
       }
 
       type BookClassResult {
+        bookingId: ID!
+        status: String!
+        spot: BookedSpot
+        waitlistPosition: Int
         booking: ClassBooking
         creditsRemaining: Int!
       }
@@ -548,12 +553,14 @@ export function extendGraphqlSchema(baseSchema: GraphQLSchema) {
         activeMemberships: Int!
         pastDueCount: Int!
       }
-    `, trainingWorkspaceTypeDefs, retailTypeDefs, counterPaymentTypeDefs, dropInTypeDefs, giftCardTypeDefs, staffIntentTypeDefs, coachProfileTypeDefs],
+    `, trainingWorkspaceTypeDefs, retailTypeDefs, counterPaymentTypeDefs, dropInTypeDefs, roomTypeDefs, giftCardTypeDefs, staffIntentTypeDefs, coachProfileTypeDefs],
     resolvers: {
       Query: {
         retailWorkspace,
         retailSaleItems,
         studioSettingsEditor,
+        classAvailability,
+        roomsWorkspace,
         trainingWorkspace: getTrainingWorkspace,
         operationsWorkspace,
         participationWorkspace,
@@ -608,6 +615,12 @@ export function extendGraphqlSchema(baseSchema: GraphQLSchema) {
         replayPaymentEvent,
         runOperationsCommand,
         bookClass,
+        joinWaitlist,
+        leaveWaitlist,
+        changeBookingSpot,
+        saveRoomLayout,
+        setSpotOutOfService,
+        promoteWaitlistBooking,
         promoteFromWaitlist,
         cancelClassBooking,
         cancelClassInstance,

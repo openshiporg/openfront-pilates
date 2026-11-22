@@ -40,7 +40,7 @@ export const ROSTER_LOCATION_PROJECTION = "id name address";
 export const ROSTER_SESSION_PROJECTION = `
   id date maxCapacity isCancelled
   bookingsCount: bookingsCount(where: { status: { equals: "confirmed" } })
-  waitlistCount: bookingsCount(where: { status: { equals: "waitlist" } })
+  waitlistCount: bookingsCount(where: { status: { equals: "waitlisted" } })
   location { id name address }
   classSchedule { id name maxCapacity startTime endTime instructor { user { name } } location { id name address } }
   instructor { user { name } }
@@ -310,8 +310,8 @@ export async function getRosterDetail(
   const inSession = [{ classInstance: { id: { equals: instance.id } } }, { organization: { id: { equals: actor.organizationId } } }];
   const groups = {
     confirmed: [{ status: { equals: "confirmed" } }],
-    waitlist: [{ status: { equals: "waitlist" } }],
-    other: [{ status: { notIn: ["confirmed", "waitlist"] } }],
+    waitlist: [{ status: { equals: "waitlisted" } }],
+    other: [{ status: { notIn: ["confirmed", "waitlisted"] } }],
   };
   const page = async (extra: any[], requested: unknown) => {
     const total = await sudo.query.ClassBooking.count({ where: { AND: [...inSession, ...extra] } });

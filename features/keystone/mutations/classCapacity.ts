@@ -3,6 +3,7 @@ import { assertParticipationAllowed, lockParticipationPolicy } from "../lib/oper
 import { enqueueOperationalNotice } from "../lib/operational-notices";
 import { guardKeystonePrismaResults } from "../lib/prisma-result";
 import { lockActiveOrganization } from "../lib/current-actor";
+import { appendHistory, chooseSpot, classCapacity, historyEntry, insideWaitlistCutoff, takenSpots, waitlistCutoffMinutes } from "../lib/spots";
 
 type CapacityMode = "waitlist" | "reject";
 
@@ -13,13 +14,17 @@ type CapacityBookingInput = {
   actorOrganizationId: string;
   actorCanManageAllRecords: boolean;
   capacityMode: CapacityMode;
+  /** The machine the client picked on the room map; without one, the lowest-numbered free machine. */
+  spotId?: string | null;
   /** A paid single-class visit: no membership or credit; the seat must be free now. */
   dropIn?: { paymentSessionId: string; amount: number; currencyCode: string };
 };
 
 type CapacityBookingResult = {
   bookingId: string;
-  status: "confirmed" | "waitlist";
+  spotId?: string | null;
+  spotLabel?: string | null;
+  status: "confirmed" | "waitlisted";
   waitlistPosition: number | null;
   creditsRemaining: number;
 };
@@ -202,8 +207,8 @@ export async function createCapacityControlledBookingInTransaction(transaction: 
         resource: PHYSICAL_RESOURCE,
         classSchedule: {
           select: {
-            id: true, name: true, maxCapacity: true, startTime: true, endTime: true, isActive: true, resource: PHYSICAL_RESOURCE,
-            classType: { select: { id: true, name: true } },
+            id: true, name: true, maxCapacity: true, startTime: true, endTime: true, isActive: true, resourceId: true, resource: PHYSICAL_RESOURCE,
+            classType: { select: { id: true, name: true, capacityMode: true } },
             location: { select: { id: true, name: true, address: true, isActive: true } },
             instructor: { select: { id: true, user: { select: { name: true } } } },
           },
@@ -241,7 +246,7 @@ export async function createCapacityControlledBookingInTransaction(transaction: 
         classInstanceId: input.classInstanceId,
         memberId: input.memberId,
         organizationId: input.actorOrganizationId,
-        status: { in: ["confirmed", "waitlist"] },
+        status: { in: ["confirmed", "waitlisted"] },
       },
       select: { id: true },
     });
@@ -261,41 +266,37 @@ export async function createCapacityControlledBookingInTransaction(transaction: 
     const grant = membership ? await ensureMonthlyCreditGrant(transaction, membership, classInstance.date) : null;
     const unlimited = grant ? grant.allowance === -1 : false;
     const currentCredits = grant ? grant.remaining : 0;
-    if (grant && !unlimited && currentCredits <= 0) {
-      throw new Error("No class credits remaining");
-    }
+    // Joining a waitlist spends nothing (4.2); a confirmed place needs a usable credit now.
+    const noUsableCredit = Boolean(grant && !unlimited && currentCredits <= 0);
 
     const maximumBookings = membership ? membership.agreementSnapshot?.maxClassBookings ?? membership.tier?.maxClassBookings ?? 0 : 0;
-    if (maximumBookings > 0 && await transaction.classBooking.count({ where: { organizationId: input.actorOrganizationId, memberId: member.id, status: { in: ["confirmed", "waitlist"] }, classInstance: { date: { gt: new Date() } } } }) >= maximumBookings) throw new Error("Membership concurrent booking limit reached");
+    if (maximumBookings > 0 && await transaction.classBooking.count({ where: { organizationId: input.actorOrganizationId, memberId: member.id, status: { in: ["confirmed", "waitlisted"] }, classInstance: { date: { gt: new Date() } } } }) >= maximumBookings) throw new Error("Membership concurrent booking limit reached");
 
     // Released seats go to the waitlist, in order, before a new arrival can take one.
     await fillReleasedSeats(transaction, input.classInstanceId, input.actorOrganizationId);
 
     if (effectivePhysicalResource(classInstance)?.isActive === false) throw new Error("This class's room is closed for new bookings");
-    const capacity = effectiveSessionCapacity(classInstance);
-    const confirmedCount = await transaction.classBooking.count({
-      where: {
-        classInstanceId: input.classInstanceId,
-        organizationId: input.actorOrganizationId,
-        status: "confirmed",
-      },
-    });
+    const { mode, capacity, spots } = await classCapacity(transaction, classInstance, effectiveSessionCapacity(classInstance));
+    const { taken, confirmed: confirmedCount } = await takenSpots(transaction, classInstance);
     const atCapacity = confirmedCount >= capacity;
     if (atCapacity && dropIn) throw new Error(DROP_IN_CLASS_FULL);
     if (atCapacity && input.capacityMode === "reject") {
       throw new Error("Class is at capacity, cannot process walk-in");
     }
+    // A requested machine that is taken is refused even when others are free (§10 test 2).
+    if (!atCapacity && noUsableCredit) throw new Error("No class credits remaining");
+    const spot = !atCapacity && mode === "pick_a_spot" ? chooseSpot(spots, taken, input.spotId ?? null) : null;
+    if (!atCapacity && mode === "pick_a_spot" && !spot) throw new Error("No machine is free in this class");
+    if (atCapacity && input.spotId) throw new Error("This class is full. Join the waitlist instead.");
 
+    // Position = max + 1 under the class lock; positions are never renumbered (order is by position).
     const waitlistPosition = atCapacity
-      ? (await transaction.classBooking.count({
-          where: {
-            classInstanceId: input.classInstanceId,
-            organizationId: input.actorOrganizationId,
-            status: "waitlist",
-          },
-        })) + 1
+      ? (((await transaction.classBooking.aggregate({
+          where: { classInstanceId: input.classInstanceId, organizationId: input.actorOrganizationId, status: "waitlisted" },
+          _max: { waitlistPosition: true },
+        }))._max?.waitlistPosition ?? 0) + 1)
       : null;
-    const status = atCapacity ? "waitlist" : "confirmed";
+    const status = atCapacity ? "waitlisted" : "confirmed";
     if (status === "confirmed") await assertNoMemberServiceConflict(transaction, member.id, input.actorOrganizationId, classInstance);
     await lockActiveOrganization(transaction, input.actorOrganizationId);
     const booking = await transaction.classBooking.create({
@@ -309,6 +310,9 @@ export async function createCapacityControlledBookingInTransaction(transaction: 
         serviceSnapshot: bookingServiceSnapshot(classInstance, { unlimited, status, membership, grant, participation, dropIn }),
         status,
         activeBookingKey: "active",
+        spotId: spot?.id ?? null,
+        activeSpotKey: spot ? "active" : null,
+        history: [historyEntry(status === "confirmed" ? "booked" : "joined", { by: input.actorUserId, spotId: spot?.id ?? null, spotLabel: spot?.label ?? null, waitlistPosition })],
         waitlistPosition,
         bookedAt: new Date(),
       },
@@ -321,6 +325,8 @@ export async function createCapacityControlledBookingInTransaction(transaction: 
 
     return {
       bookingId: booking.id,
+      spotId: spot?.id ?? null,
+      spotLabel: spot?.label ?? null,
       status,
       waitlistPosition,
       creditsRemaining: dropIn ? 0 : unlimited
@@ -384,10 +390,10 @@ function bookingServiceSnapshot(classInstance: any, terms: { unlimited: boolean;
 }
 
 /** Promotes eligible waitlisted bookings into free seats; caller holds the policy and class locks. */
-export async function fillReleasedSeats(transaction: any, classInstanceId: string, organizationId: string) {
-  const waiting = await guardKeystonePrismaResults(transaction).classBooking.count({ where: { classInstanceId, organizationId, status: "waitlist" } });
+export async function fillReleasedSeats(transaction: any, classInstanceId: string, organizationId: string, preferredSpotId: string | null = null) {
+  const waiting = await guardKeystonePrismaResults(transaction).classBooking.count({ where: { classInstanceId, organizationId, status: "waitlisted" } });
   for (let promoted = 0; promoted < waiting; promoted += 1) {
-    const result = await promoteCapacityControlledWaitlistBookingInTransaction(transaction, classInstanceId, organizationId, true);
+    const result = await promoteCapacityControlledWaitlistBookingInTransaction(transaction, classInstanceId, organizationId, true, { preferredSpotId: promoted === 0 ? preferredSpotId : null });
     if (!result.promoted) break;
   }
 }
@@ -395,11 +401,12 @@ export async function fillReleasedSeats(transaction: any, classInstanceId: strin
 export async function promoteCapacityControlledWaitlistBooking(
   prisma: any,
   classInstanceId: string,
-  organizationId: string
+  organizationId: string,
+  options: { preferredSpotId?: string | null; onlyBookingId?: string | null } = {},
 ) {
   prisma = guardKeystonePrismaResults(prisma);
   return prisma.$transaction((transaction: any) =>
-    promoteCapacityControlledWaitlistBookingInTransaction(transaction, classInstanceId, organizationId),
+    promoteCapacityControlledWaitlistBookingInTransaction(transaction, classInstanceId, organizationId, false, { ...options, manual: true }),
   );
 }
 
@@ -409,7 +416,9 @@ export async function promoteCapacityControlledWaitlistBookingInTransaction(
   classInstanceId: string,
   organizationId: string,
   locksAlreadyHeld = false,
+  options: { preferredSpotId?: string | null; manual?: boolean; onlyBookingId?: string | null } = {},
 ) {
+  const { preferredSpotId = null, manual = false, onlyBookingId = null } = options;
   transaction = guardKeystonePrismaResults(transaction);
   if (!locksAlreadyHeld) {
     await lockParticipationPolicy(transaction, organizationId);
@@ -421,7 +430,7 @@ export async function promoteCapacityControlledWaitlistBookingInTransaction(
     include: {
       location: { select: { isActive: true } },
       resource: PHYSICAL_RESOURCE,
-      classSchedule: { select: { maxCapacity: true, startTime: true, endTime: true, isActive: true, location: { select: { isActive: true } }, resource: PHYSICAL_RESOURCE } },
+      classSchedule: { select: { maxCapacity: true, startTime: true, endTime: true, isActive: true, resourceId: true, location: { select: { isActive: true } }, resource: PHYSICAL_RESOURCE, classType: { select: { capacityMode: true } } } },
     },
   });
   if (!classInstance) throw new Error("Class instance not found");
@@ -435,17 +444,26 @@ export async function promoteCapacityControlledWaitlistBookingInTransaction(
     return { promoted: false, message: "Past classes cannot promote a waitlist" };
   }
 
-  const capacity = effectiveSessionCapacity(classInstance);
-  const confirmedCount = await transaction.classBooking.count({
-    where: { classInstanceId, organizationId, status: "confirmed" },
-  });
+  // Inside the cutoff nobody is promoted; the freed machine is open to book (D6). Staff promoting
+  // by hand (manual) are not bound by the cutoff.
+  if (!manual && insideWaitlistCutoff(classInstance.date, new Date(), await waitlistCutoffMinutes(transaction, organizationId))) {
+    return { promoted: false, message: "Inside the waitlist cutoff; the machine is open to book" };
+  }
+  const { mode, capacity, spots } = await classCapacity(transaction, classInstance, effectiveSessionCapacity(classInstance));
+  const { taken, confirmed: confirmedCount } = await takenSpots(transaction, classInstance);
   if (confirmedCount >= capacity) {
     return { promoted: false, message: "Class is already at capacity" };
   }
+  const spot = mode === "pick_a_spot"
+    ? (preferredSpotId && spots.some((s: any) => s.id === preferredSpotId) && !taken.has(preferredSpotId)
+        ? spots.find((s: any) => s.id === preferredSpotId)
+        : chooseSpot(spots, taken, null))
+    : null;
+  if (mode === "pick_a_spot" && !spot) return { promoted: false, message: "No machine is free" };
 
   const candidates = await transaction.classBooking.findMany({
-    where: { classInstanceId, organizationId, status: "waitlist" },
-    orderBy: [{ bookedAt: "asc" }, { id: "asc" }],
+    where: { classInstanceId, organizationId, status: "waitlisted", ...(onlyBookingId ? { id: onlyBookingId } : {}) },
+    orderBy: [{ waitlistPosition: "asc" }, { bookedAt: "asc" }, { id: "asc" }],
     take: 10000,
     include: {
       member: { include: { user: { select: { id: true } } } },
@@ -479,16 +497,15 @@ export async function promoteCapacityControlledWaitlistBookingInTransaction(
       await assertNoMemberServiceConflict(transaction, candidate.memberId, organizationId, classInstance);
       const grant = await ensureMonthlyCreditGrant(transaction, lockedMembership, classInstance.date);
       if (grant.allowance !== -1 && grant.remaining <= 0) {
-        if (candidate.eligibilityReviewReason) {
-          await transaction.classBooking.update({ where: { id: candidate.id }, data: { eligibilityReviewReason: "" } });
-        }
+        // No usable credit: skipped, keeps the place in line (D6).
+        await transaction.classBooking.update({ where: { id: candidate.id }, data: { eligibilityReviewReason: "", history: appendHistory(candidate.history, historyEntry("skipped", { reason: "no usable credit" })) } });
         continue;
       }
     } catch (error) {
       // Expected policy denials are visible to staff; infrastructure failures
       // must abort instead of being silently acknowledged as ineligibility.
       if (!(error instanceof Error) || !/Membership|membership|Service is outside|waiver|Waiver|closure|closed|participation|Adult age verification|Registered participant verification|overlapping private appointment|overlapping class/i.test(error.message)) throw error;
-      await transaction.classBooking.update({ where: { id: candidate.id }, data: { eligibilityReviewReason: error.message } });
+      await transaction.classBooking.update({ where: { id: candidate.id }, data: { eligibilityReviewReason: error.message, history: appendHistory(candidate.history, historyEntry("skipped", { reason: error.message })) } });
       continue;
     }
     booking = candidate;
@@ -501,17 +518,13 @@ export async function promoteCapacityControlledWaitlistBookingInTransaction(
 
   await transaction.classBooking.update({
     where: { id: booking.id },
-    data: { status: "confirmed", waitlistPosition: null, eligibilityReviewReason: "" },
+    data: {
+      status: "confirmed", waitlistPosition: null, eligibilityReviewReason: "",
+      spotId: spot?.id ?? null, activeSpotKey: spot ? "active" : null,
+      history: appendHistory(booking.history, historyEntry("promoted", { manual, spotId: spot?.id ?? null, spotLabel: spot?.label ?? null })),
+    },
   });
   await debitBookingCredit(transaction, membership, booking.id, classInstance.date);
-  const remaining = await transaction.classBooking.findMany({
-    where: { classInstanceId, organizationId, status: "waitlist" },
-    orderBy: [{ bookedAt: "asc" }, { id: "asc" }],
-    select: { id: true },
-  });
-  for (let index = 0; index < remaining.length; index++) {
-    await transaction.classBooking.update({ where: { id: remaining[index].id }, data: { waitlistPosition: index + 1 } });
-  }
   const promotionNotice = await enqueueOperationalNotice(transaction, {
     organizationId,
     memberId: booking.memberId,
@@ -522,7 +535,7 @@ export async function promoteCapacityControlledWaitlistBookingInTransaction(
   // Keystone's Prisma extension can return a GraphQLError value instead of rejecting.
   // Re-throw so this transaction rolls back the seat and credit changes as well.
   if (promotionNotice instanceof Error) throw promotionNotice;
-  return { promoted: true, bookingId: booking.id, message: "Member promoted from waitlist" };
+  return { promoted: true, bookingId: booking.id, spotId: spot?.id ?? null, message: "Member promoted from waitlist" };
 }
 
 export async function assertNoMemberServiceConflict(tx: any, memberId: string, organizationId: string, instance: any) {

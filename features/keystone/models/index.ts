@@ -38,8 +38,10 @@ import { MemberImportRecord } from './MemberImportRecord';
 import { RetailItem, RetailSale, RetailReturn, RetailStockEntry, RetailClose } from './RetailModels';
 import { CounterPaymentAttempt } from './CounterPaymentAttempt';
 import { StaffIntent } from './StaffIntent';
+import { Spot } from './Spot';
 
 export const models = {
+  Spot,
   RetailItem, RetailSale, RetailReturn, RetailStockEntry, RetailClose, CounterPaymentAttempt, StaffIntent,
   MemberImportRecord,
   TrainingPackage, TrainingCreditEntry,

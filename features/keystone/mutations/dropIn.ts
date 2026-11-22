@@ -77,7 +77,7 @@ export async function startDropInCheckout(_root: unknown, { classInstanceId }: {
   if (current) throw new Error("Your membership needs attention before you can book. Review it in your account.");
   const member = await prisma.member.findFirst({ where: { organizationId, userId }, select: { id: true } });
   if (member) {
-    const duplicate = await prisma.classBooking.findFirst({ where: { organizationId, classInstanceId: id, memberId: member.id, status: { in: ["confirmed", "waitlist"] } }, select: { id: true } });
+    const duplicate = await prisma.classBooking.findFirst({ where: { organizationId, classInstanceId: id, memberId: member.id, status: { in: ["confirmed", "waitlisted"] } }, select: { id: true } });
     if (duplicate) throw new Error("You're already booked for this class");
   }
   const confirmed = await prisma.classBooking.count({ where: { organizationId, classInstanceId: id, status: "confirmed" } });

@@ -11,6 +11,31 @@ generator client {
   provider = "prisma-client-js"
 }
 
+model Spot {
+  id                     String         @id @default(cuid())
+  organization           Organization   @relation("Spot_organization", fields: [organizationId], references: [id])
+  organizationId         String         @map("organization")
+  room                   Room           @relation("Spot_room", fields: [roomId], references: [id])
+  roomId                 String         @map("room")
+  number                 Int
+  label                  String         @default("")
+  apparatus              String         @default("reformer")
+  x                      Int            @default(0)
+  y                      Int            @default(0)
+  isBookable             Boolean        @default(true)
+  outOfServiceFrom       DateTime?
+  outOfServiceUntil      DateTime?
+  retiredAt              DateTime?
+  notes                  String         @default("")
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @default(now()) @updatedAt
+  from_ClassBooking_spot ClassBooking[] @relation("ClassBooking_spot")
+
+  @@unique([roomId, number])
+  @@index([organizationId])
+  @@index([roomId])
+}
+
 model RetailItem {
   id                         String             @id @default(cuid())
   organization               Organization       @relation("RetailItem_organization", fields: [organizationId], references: [id])
@@ -509,6 +534,7 @@ model Organization {
   membershipBillingAttempts               MembershipBillingAttempt[] @relation("MembershipBillingAttempt_organization")
   createdAt                               DateTime                   @default(now())
   updatedAt                               DateTime                   @default(now()) @updatedAt
+  from_Spot_organization                  Spot[]                     @relation("Spot_organization")
   from_RetailItem_organization            RetailItem[]               @relation("RetailItem_organization")
   from_RetailSale_organization            RetailSale[]               @relation("RetailSale_organization")
   from_RetailReturn_organization          RetailReturn[]             @relation("RetailReturn_organization")
@@ -980,46 +1006,55 @@ model Location {
 }
 
 model StudioSettings {
-  id                    String       @id @default(cuid())
-  organization          Organization @relation("StudioSettings_organization", fields: [organizationId], references: [id])
-  organizationId        String       @map("organization")
-  name                  String       @default("")
-  tagline               String       @default("")
-  logoIcon              String       @default("")
-  logoColor             String       @default("0")
-  brandHue              Int          @default(16)
-  description           String       @default("")
-  address               String       @default("")
-  phone                 String       @default("")
-  email                 String       @default("")
-  currencyCode          String       @default("USD")
-  dropInPrice           Int          @default(2500)
-  lateCancelHours       Int          @default(12)
-  locale                String       @default("en-US")
-  timezone              String       @default("America/New_York")
-  countryCode           String       @default("US")
-  hours                 Json?        @default("{}")
-  heroEyebrow           String       @default("")
-  heroHeadline          String       @default("")
-  heroSubheadline       String       @default("")
-  heroImageUrl          String       @default("")
-  heroPrimaryCtaLabel   String       @default("")
-  heroPrimaryCtaHref    String       @default("")
-  heroSecondaryCtaLabel String       @default("")
-  heroSecondaryCtaHref  String       @default("")
-  promoBanner           String       @default("")
-  footerTagline         String       @default("")
-  copyrightName         String       @default("")
-  facilityHeadline      String       @default("")
-  facilityDescription   String       @default("")
-  facilityHighlights    Json?        @default("[]")
-  heroStats             Json?        @default("[]")
-  contactTopics         Json?        @default("[]")
-  participationTerms    String       @default("")
-  rating                Decimal?     @default("4.8") @postgresql.Decimal(2, 1)
-  reviewCount           Int?         @default(0)
-  createdAt             DateTime     @default(now())
-  updatedAt             DateTime     @default(now()) @updatedAt
+  id                         String       @id @default(cuid())
+  organization               Organization @relation("StudioSettings_organization", fields: [organizationId], references: [id])
+  organizationId             String       @map("organization")
+  name                       String       @default("")
+  tagline                    String       @default("")
+  logoIcon                   String       @default("")
+  logoColor                  String       @default("0")
+  brandHue                   Int          @default(16)
+  description                String       @default("")
+  address                    String       @default("")
+  phone                      String       @default("")
+  email                      String       @default("")
+  currencyCode               String       @default("USD")
+  dropInPrice                Int          @default(2500)
+  privateCancelWindowHours   Int          @default(24)
+  lateCancelFee              Int          @default(1500)
+  noShowFee                  Int          @default(2000)
+  lateCancelWaiversPer30Days Int          @default(1)
+  waitlistCutoffMinutes      Int          @default(120)
+  bookingHorizonDays         Int          @default(14)
+  requireWaiver              Boolean      @default(true)
+  gripSocksRequired          Boolean      @default(true)
+  arriveEarlyMinutes         Int          @default(10)
+  lateCancelHours            Int          @default(12)
+  locale                     String       @default("en-US")
+  timezone                   String       @default("America/New_York")
+  countryCode                String       @default("US")
+  hours                      Json?        @default("{}")
+  heroEyebrow                String       @default("")
+  heroHeadline               String       @default("")
+  heroSubheadline            String       @default("")
+  heroImageUrl               String       @default("")
+  heroPrimaryCtaLabel        String       @default("")
+  heroPrimaryCtaHref         String       @default("")
+  heroSecondaryCtaLabel      String       @default("")
+  heroSecondaryCtaHref       String       @default("")
+  promoBanner                String       @default("")
+  footerTagline              String       @default("")
+  copyrightName              String       @default("")
+  facilityHeadline           String       @default("")
+  facilityDescription        String       @default("")
+  facilityHighlights         Json?        @default("[]")
+  heroStats                  Json?        @default("[]")
+  contactTopics              Json?        @default("[]")
+  participationTerms         String       @default("")
+  rating                     Decimal?     @default("4.8") @postgresql.Decimal(2, 1)
+  reviewCount                Int?         @default(0)
+  createdAt                  DateTime     @default(now())
+  updatedAt                  DateTime     @default(now()) @updatedAt
 
   @@unique([organizationId], map: "StudioSettings_organization_key")
   @@index([organizationId])
@@ -1054,18 +1089,26 @@ model AttendanceRecord {
 }
 
 model ClassType {
-  id              String          @id @default(cuid())
-  organization    Organization    @relation("ClassType_organization", fields: [organizationId], references: [id])
-  organizationId  String          @map("organization")
-  name            String          @default("")
-  description     Json            @default("[{\"type\":\"paragraph\",\"children\":[{\"text\":\"\"}]}]")
-  difficulty      String          @default("all-levels")
-  duration        Int             @default(60)
-  equipmentNeeded Json            @default("[]")
-  caloriesBurn    Int?
-  schedules       ClassSchedule[] @relation("ClassSchedule_classType")
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @default(now()) @updatedAt
+  id                        String          @id @default(cuid())
+  organization              Organization    @relation("ClassType_organization", fields: [organizationId], references: [id])
+  organizationId            String          @map("organization")
+  name                      String          @default("")
+  description               Json            @default("[{\"type\":\"paragraph\",\"children\":[{\"text\":\"\"}]}]")
+  difficulty                String          @default("all-levels")
+  duration                  Int             @default(60)
+  equipmentNeeded           Json            @default("[]")
+  caloriesBurn              Int?
+  apparatus                 String          @default("reformer")
+  creditKind                String          @default("group")
+  capacityMode              String          @default("pick_a_spot")
+  requiresIntro             Boolean         @default(false)
+  isIntroClass              Boolean         @default(false)
+  cancelWindowHoursOverride Int?
+  lateCancelFeeOverride     Int?
+  noShowFeeOverride         Int?
+  schedules                 ClassSchedule[] @relation("ClassSchedule_classType")
+  createdAt                 DateTime        @default(now())
+  updatedAt                 DateTime        @default(now()) @updatedAt
 
   @@unique([organizationId, name])
   @@index([organizationId])
@@ -1117,6 +1160,10 @@ model ClassBooking {
   serviceSnapshot                    Json?
   eligibilityReviewReason            String                  @default("")
   notes                              String                  @default("")
+  spot                               Spot?                   @relation("ClassBooking_spot", fields: [spotId], references: [id])
+  spotId                             String?                 @map("spot")
+  activeSpotKey                      String?
+  history                            Json?                   @default("[]")
   activeBookingKey                   String?
   status                             String                  @default("confirmed")
   waitlistPosition                   Int?
@@ -1129,9 +1176,11 @@ model ClassBooking {
   from_AttendanceRecord_booking      AttendanceRecord[]      @relation("AttendanceRecord_booking")
 
   @@unique([organizationId, classInstanceId, memberId, activeBookingKey])
+  @@unique([organizationId, classInstanceId, spotId, activeSpotKey])
   @@index([organizationId])
   @@index([classInstanceId])
   @@index([memberId])
+  @@index([spotId])
 }
 
 model Instructor {
@@ -1204,6 +1253,8 @@ model Room {
   notes                       String          @default("")
   metadata                    Json?           @default("{}")
   allocationHistory           Json?           @default("[]")
+  layout                      Json?           @default("{\"width\":8,\"height\":4}")
+  spots                       Spot[]          @relation("Spot_room")
   appointments                Appointment[]   @relation("Appointment_resource")
   createdAt                   DateTime        @default(now())
   updatedAt                   DateTime        @default(now()) @updatedAt

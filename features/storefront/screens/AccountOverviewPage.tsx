@@ -16,7 +16,7 @@ export default async function AccountOverviewPage() {
   // The soonest confirmed session, and the waitlist total, from the date-ordered server pages.
   const [confirmedPage, waitlistPage, config, refreshed] = await Promise.all([
     getUpcomingBookingPage("confirmed", 1, { pageSize: 1 }),
-    getUpcomingBookingPage("waitlist", 1, { pageSize: 1 }),
+    getUpcomingBookingPage("waitlisted", 1, { pageSize: 1 }),
     getStorefrontConfig(),
     refreshMyMembership(),
   ]);

@@ -138,7 +138,7 @@ export async function reviewFutureMembershipBookings(tx: any, membership: any) {
   tx = guardKeystonePrismaResults(tx);
   const bookings = await tx.classBooking.findMany({ where: {
     organizationId: membership.organizationId, member: { userId: membership.memberId },
-    status: { in: ["confirmed", "waitlist"] }, classInstance: { date: { gt: new Date() } },
+    status: { in: ["confirmed", "waitlisted"] }, classInstance: { date: { gt: new Date() } },
   }, include: { classInstance: true, member: { select: { status: true } } }, take: 1000 });
   for (const booking of bookings) {
     let reason = "";
@@ -192,7 +192,7 @@ export async function refreshScopedMembership(prisma: any, organizationId: strin
       }
     } else reason = `Member ${member.status}; membership ${membership.status}`;
     const reviewed = await reviewFutureMembershipBookings(tx, membership);
-    if (member.status !== "active") await tx.classBooking.updateMany({ where: { organizationId, memberId: member.id, status: { in: ["confirmed", "waitlist"] }, classInstance: { date: { gt: now } } }, data: { eligibilityReviewReason: `Member account is ${member.status}` } });
+    if (member.status !== "active") await tx.classBooking.updateMany({ where: { organizationId, memberId: member.id, status: { in: ["confirmed", "waitlisted"] }, classInstance: { date: { gt: now } } }, data: { eligibilityReviewReason: `Member account is ${member.status}` } });
     return { refreshed, reason, membershipId, reviewed, reviewLimitReached: reviewed >= 1000 };
   });
 }

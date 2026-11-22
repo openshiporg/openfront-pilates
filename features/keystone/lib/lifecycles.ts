@@ -31,8 +31,12 @@ export const SUBSCRIPTION_MACHINE = m({
 });
 
 export const BOOKING_MACHINE = m({
-  confirmed: ["cancelled"],
-  waitlist: ["confirmed", "cancelled"],
+  // Dissertation 4.2. attended|no_show -> confirmed is staff undo, refused once the pay line is locked.
+  confirmed: ["cancelled", "late_cancelled", "attended", "no_show"],
+  waitlisted: ["confirmed", "cancelled"],
+  attended: ["confirmed"],
+  no_show: ["confirmed"],
+  late_cancelled: [],
   cancelled: [],
 });
 

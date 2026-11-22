@@ -70,7 +70,7 @@ export async function SchedulePage({ searchParams = {} }: { searchParams?: Recor
     participation,
     bookings: Object.fromEntries(upcoming.filter((booking: any) => booking.classInstance?.id).map((booking: any) => [
       booking.classInstance.id,
-      { status: booking.status === "waitlist" ? "waitlist" : "confirmed", waitlistPosition: booking.waitlistPosition ?? null },
+      { status: booking.status === "waitlisted" ? "waitlisted" : "confirmed", waitlistPosition: booking.waitlistPosition ?? null },
     ])),
   };
   if (book && !occurrences.some(item => item.id === book)) {

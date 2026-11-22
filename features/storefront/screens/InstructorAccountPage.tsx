@@ -113,7 +113,7 @@ function prepareSessions(instructor: InstructorProfile): PreparedSession[] {
     .slice(0, 20)
     .map((session) => {
       const confirmedBookings = (session.bookings ?? []).filter((booking) => booking.status === "confirmed").length;
-      const waitlistCount = (session.bookings ?? []).filter((booking) => booking.status === "waitlist").length;
+      const waitlistCount = (session.bookings ?? []).filter((booking) => booking.status === "waitlisted").length;
       const capacity = session.maxCapacity ?? session.classSchedule?.maxCapacity ?? 0;
 
       return {

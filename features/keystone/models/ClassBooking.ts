@@ -16,7 +16,8 @@ import { bookingLifecycleHooks } from "../mutations/studioLifecyclePolicy";
 import { compoundUniqueDb, requiredRelationshipDb, validateTenantOwnership, restrictDeleteDb } from "./tenantRelationships";
 
 export const ClassBooking = list({
-  db: { extendPrismaSchema: compoundUniqueDb("organizationId, classInstanceId, memberId, activeBookingKey") },
+  // One active booking per (class, client) and per (class, machine): the database refuses a second.
+  db: { extendPrismaSchema: compoundUniqueDb("organizationId, classInstanceId, memberId, activeBookingKey", "organizationId, classInstanceId, spotId, activeSpotKey") },
   hooks: {
     async validateInput(args: any) {
       bookingLifecycleHooks.validateInput(args);
@@ -107,6 +108,14 @@ export const ClassBooking = list({
         description: "Special notes or requests for this booking",
       },
     }),
+    // The machine this booking holds. Kept after a cancel for history; activeSpotKey is what holds it.
+    spot: relationship({ ref: "Spot", access: { create: denyAll, update: denyAll } }),
+    activeSpotKey: text({
+      db: { isNullable: true },
+      access: { read: denyAll, create: denyAll, update: denyAll },
+    }),
+    // joined, booked, promoted, skipped, left, lapsed, spot_changed, cancelled ... (dissertation 4.2, 4.8)
+    history: json({ defaultValue: [], access: { create: denyAll, update: denyAll }, ui: { itemView: { fieldMode: "read" } } }),
     activeBookingKey: text({
       db: { isNullable: true },
       access: { read: denyAll, create: denyAll, update: denyAll },
@@ -117,8 +126,11 @@ export const ClassBooking = list({
       type: "string",
       options: [
         { label: "Confirmed", value: "confirmed" },
+        { label: "Waitlisted", value: "waitlisted" },
         { label: "Cancelled", value: "cancelled" },
-        { label: "Waitlist", value: "waitlist" },
+        { label: "Late cancelled", value: "late_cancelled" },
+        { label: "Attended", value: "attended" },
+        { label: "No show", value: "no_show" },
       ],
       defaultValue: "confirmed",
       validation: { isRequired: true },
@@ -127,7 +139,7 @@ export const ClassBooking = list({
     waitlistPosition: integer({
       access: { update: denyAll },
       ui: {
-        description: "Position in waitlist (only applicable when status is 'waitlist')",
+        description: "Position in waitlist (only applicable when status is 'waitlisted')",
       },
     }),
 

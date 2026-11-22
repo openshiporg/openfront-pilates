@@ -331,7 +331,7 @@ function publicClassInstance(instance: any) {
     (booking: any) => booking.status === "confirmed"
   ).length;
   const waitlistCount = (instance.bookings ?? []).filter(
-    (booking: any) => booking.status === "waitlist"
+    (booking: any) => booking.status === "waitlisted"
   ).length;
   const maxCapacity = instance.maxCapacity ?? instance.classSchedule?.maxCapacity ?? 0;
   const instructor = instance.instructor ?? instance.classSchedule?.instructor ?? null;

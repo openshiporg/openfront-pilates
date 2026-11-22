@@ -81,7 +81,7 @@ export async function saveControlledOccurrence(tx: any, organizationId: string, 
   };
   if (!Number.isInteger(data.maxCapacity) || data.maxCapacity < 1 || data.maxCapacity > 10000) throw new Error("Capacity must be a whole number from 1 to 10000");
   await assertClassAllocation(tx, organizationId, { ...data, classSchedule: schedule }, id || undefined);
-  const bookings = existing ? await tx.classBooking.findMany({ where: { organizationId, classInstanceId: existing.id, status: { in: ["confirmed", "waitlist"] } }, include: { member: { include: { user: { include: { membership: true } } } } } }) : [];
+  const bookings = existing ? await tx.classBooking.findMany({ where: { organizationId, classInstanceId: existing.id, status: { in: ["confirmed", "waitlisted"] } }, include: { member: { include: { user: { include: { membership: true } } } } } }) : [];
   if (bookings.filter((b: any) => b.status === "confirmed").length > data.maxCapacity) throw new Error("Capacity is below confirmed bookings");
   const changed = existing && (existing.date.getTime() !== date.getTime() || existing.instructorId !== data.instructorId || existing.locationId !== data.locationId || existing.resourceId !== data.resourceId);
   if (changed) {

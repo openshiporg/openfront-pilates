@@ -106,7 +106,7 @@ export async function getDiscoveryClassFeed(context: any, options: {
   return instances
     .map((instance: any) => {
     const confirmedBookings = (instance.bookings ?? []).filter((booking: any) => booking.status === 'confirmed').length;
-    const waitlistCount = (instance.bookings ?? []).filter((booking: any) => booking.status === 'waitlist').length;
+    const waitlistCount = (instance.bookings ?? []).filter((booking: any) => booking.status === 'waitlisted').length;
     const maxCapacity = instance.maxCapacity ?? instance.classSchedule?.maxCapacity ?? 0;
     const spotsRemaining = Math.max(maxCapacity - confirmedBookings, 0);
 
@@ -228,7 +228,7 @@ async function createDiscoveryBooking(context: any, input: {
         { organization: { id: { equals: input.organizationId } } },
         { member: { id: { equals: member.id } } },
         { classInstance: { id: { equals: input.classInstanceId } } },
-        { status: { in: ["confirmed", "waitlist"] } },
+        { status: { in: ["confirmed", "waitlisted"] } },
       ],
     },
     take: 1,

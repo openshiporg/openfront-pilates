@@ -43,7 +43,7 @@ export interface ClassBooking {
   class: StudioClass;
   member: Member;
   scheduledDate: string;
-  status: 'confirmed' | 'waitlist' | 'cancelled' | 'completed';
+  status: 'confirmed' | 'waitlisted' | 'cancelled' | 'completed';
   createdAt: string;
 }
 

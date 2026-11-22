@@ -56,7 +56,7 @@ export async function setMemberAccountStatus(
     }
     const updated = await transaction.member.update({ where: { id: member.id }, data: { status } });
     await transaction.classBooking.updateMany({ where: {
-      organizationId, memberId, status: { in: ['confirmed', 'waitlist'] }, classInstance: { date: { gt: new Date() } },
+      organizationId, memberId, status: { in: ['confirmed', 'waitlisted'] }, classInstance: { date: { gt: new Date() } },
       ...(status === 'active' ? { eligibilityReviewReason: 'Member account is suspended' } : {}),
     }, data: { eligibilityReviewReason: status === 'active' ? '' : 'Member account is suspended' } });
     await enqueueOperationalNotice(transaction, { organizationId, memberId, key: `member-status:${memberId}:${updated.updatedAt.toISOString()}`, kind: 'membership', message: `Your member account is now ${status}. Existing reservations remain visible for staff review; participation requires current eligibility.` });

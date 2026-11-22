@@ -53,6 +53,9 @@ function throwingDelegate<T extends object>(delegate: T): T {
   return wrapped
 }
 
+const TRANSACTION_MAX_WAIT_MS = Number(process.env.DATABASE_TRANSACTION_MAX_WAIT_MS) || 15_000
+const TRANSACTION_TIMEOUT_MS = Number(process.env.DATABASE_TRANSACTION_TIMEOUT_MS) || 30_000
+
 export function throwKeystonePrismaErrors<T extends object>(client: T): T {
   const cached = clients.get(client)
   if (cached) return cached
@@ -61,7 +64,9 @@ export function throwKeystonePrismaErrors<T extends object>(client: T): T {
       const value = Reflect.get(target, key, target)
       if (key === '$transaction' && typeof value === 'function') {
         return (work: unknown, ...options: unknown[]) => {
-          if (typeof work === 'function') return value.call(target, (tx: object) => (work as any)(throwKeystonePrismaErrors(tx)), ...options)
+          // Interactive transactions hold advisory locks while they wait on each other; Prisma's 5s default
+          // fails a correct booking under contention. Callers may still pass their own options.
+          if (typeof work === 'function') return value.call(target, (tx: object) => (work as any)(throwKeystonePrismaErrors(tx)), { maxWait: TRANSACTION_MAX_WAIT_MS, timeout: TRANSACTION_TIMEOUT_MS, ...((options[0] as object) ?? {}) })
           return Promise.resolve(value.call(target, work, ...options)).then((results: unknown) => (Array.isArray(results) ? results.map(rethrowKeystonePrismaError) : results))
         }
       }

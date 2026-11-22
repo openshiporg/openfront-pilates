@@ -32,7 +32,7 @@ export const UPCOMING_PAGE_SIZE = 20;
  * the total, so every upcoming booking is reachable however many there are. `before` limits the
  * page to sessions starting before that time (the schedule's window).
  */
-export async function getUpcomingBookingPage(status: "confirmed" | "waitlist", page = 1, options: { pageSize?: number; before?: string } = {}) {
+export async function getUpcomingBookingPage(status: "confirmed" | "waitlisted", page = 1, options: { pageSize?: number; before?: string } = {}) {
   const headers = await getAuthHeaders();
   const pageSize = Math.min(Math.max(Math.trunc(options.pageSize ?? UPCOMING_PAGE_SIZE), 1), 50);
   const requested = Math.max(1, Math.trunc(page) || 1);
@@ -53,7 +53,7 @@ export async function getUpcomingBookingPage(status: "confirmed" | "waitlist", p
 /** Every upcoming confirmed and waitlisted booking for sessions starting before `before`, in date order. */
 export async function getUpcomingBookingsBefore(before: string) {
   const all: any[] = [];
-  for (const status of ["confirmed", "waitlist"] as const) {
+  for (const status of ["confirmed", "waitlisted"] as const) {
     for (let page = 1; ; page += 1) {
       const result = await getUpcomingBookingPage(status, page, { pageSize: 50, before });
       all.push(...result.items);

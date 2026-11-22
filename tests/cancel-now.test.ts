@@ -67,7 +67,7 @@ test("cancel now releases the member's upcoming bookings through the normal book
   const lifecycle = source("features/keystone/mutations/studioLifecycle.ts");
   const release = lifecycle.slice(lifecycle.indexOf("export async function releaseFutureBookingsForEndedMembership"));
   // only classes that haven't started, confirmed or waitlisted, never a cancelled class
-  assert.match(release, /status: \{ in: \["confirmed", "waitlist"\] \}/);
+  assert.match(release, /status: \{ in: \["confirmed", "waitlisted"\] \}/);
   assert.match(release, /classInstance: \{ date: \{ gt: new Date\(\) \}, isCancelled: false \}/);
   // the same path as a member cancel: credit restore, waitlist promotion and the member notice
   assert.match(release, /cancelCapacityControlledBooking\(prisma, \{ bookingId: booking\.id, actor \}\)/);

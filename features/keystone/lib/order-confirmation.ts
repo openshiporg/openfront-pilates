@@ -62,7 +62,7 @@ export async function deliverBookingConfirmation(prisma: any, bookingId: string,
         const zone = booking.organization?.timezone || "UTC";
         const name = booking.classInstance?.classSchedule?.name || "your class";
         const place = booking.classInstance?.location?.name || booking.classInstance?.classSchedule?.location?.name;
-        const waitlisted = booking.status === "waitlist";
+        const waitlisted = booking.status === "waitlisted";
         const publicAppUrl = (path: string) => internalOrigin.publicAppUrl(path);
         return {
           to: booking.memberEmail,

@@ -184,7 +184,7 @@ export async function getMemberCheckInCode(_root: unknown, _args: unknown, conte
   };
 }
 
-const UPCOMING_STATUSES = new Set(["confirmed", "waitlist"]);
+const UPCOMING_STATUSES = new Set(["confirmed", "waitlisted"]);
 
 /**
  * One page of the signed-in member's own upcoming bookings in session-date order (the order a

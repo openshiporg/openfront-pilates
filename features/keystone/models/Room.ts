@@ -78,6 +78,9 @@ export const Room = list({
       access: { create: denyAll, update: denyAll },
       ui: { createView: { fieldMode: "hidden" }, itemView: { fieldMode: "read" } },
     }),
+    /** Grid the room map is drawn on: { width, height, instructor: {x,y}, door: {x,y} }. Written by saveRoomLayout. */
+    layout: json({ defaultValue: { width: 8, height: 4 }, access: { create: denyAll, update: denyAll } }),
+    spots: relationship({ ref: "Spot.room", many: true, access: { create: denyAll, update: denyAll } }),
     appointments: relationship({
       ref: "Appointment.resource",
       many: true,

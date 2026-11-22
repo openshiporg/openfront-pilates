@@ -74,7 +74,7 @@ test("requires a reason, operator rights, a started class and a confirmed bookin
   await assert.rejects(run({}, operator, " "), /reason between 3 and 1000/);
   await assert.rejects(run({}, { ...operator, canManageAllRecords: false }, "QA test cleanup"), /permission required/);
   await assert.rejects(run({ startsIn: HOUR }, operator, "QA test cleanup"), /hasn't started; use the normal cancel/);
-  await assert.rejects(run({ status: "waitlist" }, operator, "QA test cleanup"), /Only a confirmed booking/);
+  await assert.rejects(run({ status: "waitlisted" }, operator, "QA test cleanup"), /Only a confirmed booking/);
 });
 
 test("the normal cancel still refuses after the class starts", async () => {

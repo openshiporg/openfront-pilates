@@ -1,9 +1,6 @@
 import { Context } from '.keystone/types';
 import { currentRoleActor } from "../access/currentRoleActor";
-import {
-  createCapacityControlledBooking,
-  promoteCapacityControlledWaitlistBooking,
-} from './classCapacity';
+import { promoteCapacityControlledWaitlistBooking } from './classCapacity';
 
 /**
  * Check class availability and handle booking logic
@@ -65,7 +62,7 @@ export async function checkClassAvailability(
       where: {
         classInstance: { id: { equals: classInstanceId } },
         organization: { id: { equals: organizationId } },
-        status: { equals: 'waitlist' },
+        status: { equals: 'waitlisted' },
       },
     });
     waitlistPosition = waitlistCount + 1;
@@ -86,31 +83,21 @@ async function currentOperatorActor(context: Context) {
 }
 
 /**
- * Book a class for a member.
- * memberId is the Member record ID, not the User ID.
+ * Book a class (§5.9): bookClass(classInstanceId, spotId, memberId, idempotencyKey). memberId is
+ * the Member record id and is only needed when staff book for a client.
  */
 export async function bookClass(
   root: any,
-  args: { classInstanceId: string; memberId: string },
+  args: { classInstanceId: string; spotId?: string | null; memberId?: string | null; idempotencyKey?: string | null },
   context: Context
 ) {
-  const actor = await currentRoleActor(context);
-  const { classInstanceId, memberId } = args;
-  const organizationId = actor.organizationId;
-  const result = await createCapacityControlledBooking(context.prisma, {
-    classInstanceId,
-    memberId,
-    actorUserId: actor.userId,
-    actorOrganizationId: organizationId,
-    actorCanManageAllRecords: actor.canManageAllRecords,
-    capacityMode: 'waitlist',
-  });
+  const { bookClassWithSpot } = await import("./rooms");
+  const result = await bookClassWithSpot(root, args, context);
   const booking = await context.sudo().query.ClassBooking.findOne({
     where: { id: result.bookingId },
     query: 'id status waitlistPosition bookedAt',
   });
-
-  return { booking, creditsRemaining: result.creditsRemaining };
+  return { ...result, booking };
 }
 
 export async function promoteFromWaitlist(

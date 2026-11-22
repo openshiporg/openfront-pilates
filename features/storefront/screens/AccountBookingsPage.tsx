@@ -30,7 +30,7 @@ export default async function AccountBookingsPage({
   // Each tab pages on the server in session-date order; the other tabs are read only for their totals.
   const [confirmed, waitlist, history, config] = await Promise.all([
     getUpcomingBookingPage("confirmed", view === "upcoming" ? page : 1, view === "upcoming" ? {} : { pageSize: 1 }),
-    getUpcomingBookingPage("waitlist", view === "waitlist" ? page : 1, view === "waitlist" ? {} : { pageSize: 1 }),
+    getUpcomingBookingPage("waitlisted", view === "waitlist" ? page : 1, view === "waitlist" ? {} : { pageSize: 1 }),
     getBookingHistory(user.id, organizationId, view === "history" ? page : 1),
     getStorefrontConfig(),
   ]);
@@ -93,7 +93,7 @@ export default async function AccountBookingsPage({
 
 function bookingState(status: string, position?: number | null) {
   if (status === "confirmed") return { tone: "ok", label: "Confirmed" };
-  if (status === "waitlist") return { tone: "low", label: position ? `Waitlist · #${position}` : "Waitlist" };
+  if (status === "waitlisted") return { tone: "low", label: position ? `Waitlist · #${position}` : "Waitlist" };
   if (status === "cancelled") return { tone: "neutral", label: "Cancelled" };
   const text = status.replace(/[-_]+/g, " ");
   return { tone: "neutral", label: text.charAt(0).toUpperCase() + text.slice(1) };
@@ -153,7 +153,7 @@ function BookingRow({
       </div>
       {canCancel && booking.status !== "cancelled" ? (
         <div className="sf-booking-side">
-          <CancelBookingForm bookingId={booking.id} sessionName={`${name}${date ? `, ${formatOccurrenceDate(date, timeZone)}, ${formatOccurrenceTime(date, timeZone)}` : ""}`} waitlist={booking.status === "waitlist"} dropIn={booked?.credit?.basis === "drop_in_paid"} lateWindowHours={booking.status === "confirmed" && date && lateCancelHours > 0 && new Date(date).getTime() - now < lateCancelHours * 3_600_000 ? lateCancelHours : 0} />
+          <CancelBookingForm bookingId={booking.id} sessionName={`${name}${date ? `, ${formatOccurrenceDate(date, timeZone)}, ${formatOccurrenceTime(date, timeZone)}` : ""}`} waitlist={booking.status === "waitlisted"} dropIn={booked?.credit?.basis === "drop_in_paid"} lateWindowHours={booking.status === "confirmed" && date && lateCancelHours > 0 && new Date(date).getTime() - now < lateCancelHours * 3_600_000 ? lateCancelHours : 0} />
         </div>
       ) : null}
       {booking.classInstance?.isCancelled ? (

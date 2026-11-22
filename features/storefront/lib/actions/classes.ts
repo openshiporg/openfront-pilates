@@ -13,9 +13,10 @@ export type BookClassResult =
   | {
       success: true;
       bookingId: string;
-      status: "confirmed" | "waitlist";
+      status: "confirmed" | "waitlisted";
       waitlistPosition: number | null;
       creditsRemaining: number;
+      spotLabel?: string | null;
     }
   | {
       success: false;
@@ -150,7 +151,7 @@ function bookingFailure(message: string, classInstanceId: string): BookClassResu
  * Book a class instance for the authenticated user.
  * Looks up the Member record via User.id first (Member → user relation).
  */
-export async function bookClass(classInstanceId: string): Promise<BookClassResult> {
+export async function bookClass(classInstanceId: string, spotId: string | null = null): Promise<BookClassResult> {
   try {
     const headers = await getAuthHeaders();
     if (!Object.keys(headers).length) {
@@ -212,14 +213,15 @@ export async function bookClass(classInstanceId: string): Promise<BookClassResul
     // Call the bookClass mutation
     const result = await studioClient.request<any>(
       gql`
-        mutation BookClass($classInstanceId: ID!, $memberId: ID!) {
-          bookClass(classInstanceId: $classInstanceId, memberId: $memberId) {
+        mutation BookClass($classInstanceId: ID!, $memberId: ID!, $spotId: ID) {
+          bookClass(classInstanceId: $classInstanceId, memberId: $memberId, spotId: $spotId) {
             booking { id status waitlistPosition }
+            spot { id number label }
             creditsRemaining
           }
         }
       `,
-      { classInstanceId, memberId },
+      { classInstanceId, memberId, spotId },
       headers
     );
 
@@ -229,6 +231,7 @@ export async function bookClass(classInstanceId: string): Promise<BookClassResul
       status: result.bookClass.booking.status,
       waitlistPosition: result.bookClass.booking.waitlistPosition ?? null,
       creditsRemaining: result.bookClass.creditsRemaining,
+      spotLabel: result.bookClass.spot?.label ?? null,
     };
   } catch (e: any) {
     const msg = e?.response?.errors?.[0]?.message ?? e?.message ?? "Booking failed";

@@ -29,7 +29,7 @@ export type BookingViewer = {
   /** A drop-in checkout that couldn't start, shown on the membership step. */
   dropInError?: string | null;
   /** The member's upcoming confirmed or waitlisted bookings, by session id. */
-  bookings?: Record<string, { status: "confirmed" | "waitlist"; waitlistPosition?: number | null }>;
+  bookings?: Record<string, { status: "confirmed" | "waitlisted"; waitlistPosition?: number | null }>;
   /** Published participation terms, accepted at sign-up. */
   terms?: { policyId: string; version: string } | null;
   /** Signed-in member's standing against the current participation terms. */
@@ -81,7 +81,7 @@ export default function ClassBookingModal({
     startTransition(async () => {
       const res = await bookClass(classData.id);
       if (res.success) {
-        const waitlist = res.status === "waitlist";
+        const waitlist = res.status === "waitlisted";
         setResult({
           success: true,
           waitlist,
@@ -149,10 +149,10 @@ export default function ClassBookingModal({
       {step === "booked" && existing ? (
         <>
           <Banner
-            tone={existing.status === "waitlist" ? "warn" : "ok"}
-            title={existing.status === "waitlist" ? `You’re on the waitlist${existing.waitlistPosition ? ` · position ${existing.waitlistPosition}` : ""}` : "You’re booked for this class"}
+            tone={existing.status === "waitlisted" ? "warn" : "ok"}
+            title={existing.status === "waitlisted" ? `You’re on the waitlist${existing.waitlistPosition ? ` · position ${existing.waitlistPosition}` : ""}` : "You’re booked for this class"}
           >
-            {existing.status === "waitlist" ? "If a place opens, it’s offered in waitlist order while your membership and credits still allow it. Leave the waitlist from your bookings." : "Cancel from your bookings if you can’t make it."}
+            {existing.status === "waitlisted" ? "If a place opens, it’s offered in waitlist order while your membership and credits still allow it. Leave the waitlist from your bookings." : "Cancel from your bookings if you can’t make it."}
           </Banner>
           <div className="sf-sheet-actions">
             <button type="button" className="sf-btn" data-variant="secondary" onClick={handleClose}>Close</button>

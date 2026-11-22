@@ -12,7 +12,9 @@
     "lint:nks-legacy": "eslint components/ui features/dashboard",
     "lint:all": "eslint app pages features/keystone features/integrations features/kiosk features/member features/platform features/storefront lib tests proxy.ts keystone.ts next.config.ts",
     "typecheck": "tsc --noEmit -p . --incremental false",
+    "test": "bash scripts/test.sh",
     "test:offline": "node --import tsx --test tests/*.test.ts",
+    "test:db": "node --import tsx --test --test-concurrency=1 --test-timeout=600000 tests/db/*.db.test.ts",
     "migrate:gen": "keystone build --no-ui && tsx features/keystone/view-order/generate-view-order.ts && keystone prisma migrate dev",
     "migrate": "prisma migrate deploy"
   },

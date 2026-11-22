@@ -40,13 +40,13 @@ test("a cancelled subscription projection stays cancelled; a replay of the same 
 test("bookings: cancel a cancelled booking is a no-op, a cancelled booking can't be confirmed", () => {
   assertBookingStatusTransition("cancelled", "cancelled");
   assert.throws(() => assertBookingStatusTransition("cancelled", "confirmed"), /cancelled -> confirmed/);
-  assert.throws(() => assertBookingStatusTransition("confirmed", "waitlist"), /confirmed -> waitlist/);
-  assertBookingStatusTransition("waitlist", "confirmed");
+  assert.throws(() => assertBookingStatusTransition("confirmed", "waitlisted"), /confirmed -> waitlisted/);
+  assertBookingStatusTransition("waitlisted", "confirmed");
 });
 
 test("unknown statuses are refused with a clear error", () => {
   assert.throws(() => assertTransition(BOOKING_MACHINE, "booking", "bogus", "confirmed"), /Unknown booking status: bogus/);
-  assert.throws(() => assertTransition(BOOKING_MACHINE, "booking", "confirmed", "attended"), /Unknown booking status: attended/);
+  assert.throws(() => assertTransition(BOOKING_MACHINE, "booking", "confirmed", "completed"), /Unknown booking status: completed/);
 });
 
 test("member accounts: a cancelled account can't be reopened, suspended can resume", () => {

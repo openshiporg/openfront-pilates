@@ -30,6 +30,204 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
+// features/keystone/access/tenantPolicy.ts
+function getTenantId(session) {
+  const id = session?.data?.organization?.id;
+  return typeof id === "string" && id.length > 0 ? id : null;
+}
+function tenantFilter({ session }, narrowerFilter) {
+  const organizationId = getTenantId(session);
+  if (!organizationId) return false;
+  const organizationFilter = { organization: { id: { equals: organizationId } } };
+  if (!narrowerFilter) return organizationFilter;
+  return { AND: [organizationFilter, narrowerFilter] };
+}
+function tenantItemAccess({ session, item }) {
+  const organizationId = getTenantId(session);
+  if (!organizationId || !item) return false;
+  const itemOrganizationId = item.organizationId ?? item.organization?.id;
+  return itemOrganizationId === organizationId;
+}
+function canManageTenant({ session }, permission) {
+  if (!getTenantId(session)) return false;
+  if (session?.data?.role?.canManageAllRecords) return true;
+  return permission ? Boolean(session?.data?.role?.[permission]) : false;
+}
+var init_tenantPolicy = __esm({
+  "features/keystone/access/tenantPolicy.ts"() {
+    "use strict";
+  }
+});
+
+// features/keystone/access.ts
+function isOperatorSession(session) {
+  return session?.data.role?.canManageAllRecords ?? false;
+}
+function canSeePeople(session) {
+  const role = session?.data.role;
+  return Boolean(role?.canManageAllRecords || role?.canSeeOtherPeople || role?.canEditOtherPeople || role?.canManagePeople);
+}
+function canEditPeople(session) {
+  const role = session?.data.role;
+  return Boolean(role?.canManageAllRecords || role?.canEditOtherPeople || role?.canManagePeople);
+}
+function ownBookingFilter(session) {
+  return { member: { user: { id: { equals: session.itemId } } } };
+}
+function ownerFilter(session, filter) {
+  if (!session) return false;
+  return tenantFilter(
+    { session },
+    isOperatorSession(session) ? void 0 : filter
+  );
+}
+function isSignedIn({ session }) {
+  return Boolean(session);
+}
+var permissions, rules;
+var init_access = __esm({
+  "features/keystone/access.ts"() {
+    "use strict";
+    init_tenantPolicy();
+    permissions = {
+      canCreateRecords: ({ session }) => session?.data.role?.canCreateRecords ?? false,
+      canManageAllRecords: ({ session }) => isOperatorSession(session),
+      canManagePeople: ({ session }) => session?.data.role?.canManagePeople ?? false,
+      canManageRoles: ({ session }) => session?.data.role?.canManageRoles ?? false,
+      canAccessDashboard: ({ session }) => session?.data.role?.canAccessDashboard ?? false,
+      canManageOnboarding: ({ session }) => session?.data.role?.canManageOnboarding ?? false,
+      canManageSettings: ({ session }) => session?.data.role?.canManageSettings ?? false,
+      canManageAppointments: ({ session }) => session?.data.role?.canManageAppointments ?? false,
+      canManageCheckIns: ({ session }) => session?.data.role?.canManageCheckIns ?? false,
+      canManageFacilities: ({ session }) => session?.data.role?.canManageFacilities ?? false,
+      canManagePrograms: ({ session }) => session?.data.role?.canManagePrograms ?? false,
+      canManageCommunications: ({ session }) => session?.data.role?.canManageCommunications ?? false,
+      canManageRetail: ({ session }) => session?.data.role?.canManageRetail ?? false,
+      canManagePayroll: ({ session }) => session?.data.role?.canManagePayroll ?? false,
+      canViewReports: ({ session }) => session?.data.role?.canViewReports ?? false,
+      isInstructor: ({ session }) => session?.data.role?.isInstructor ?? false
+    };
+    rules = {
+      canReadOwnUser: ({ session }) => {
+        if (!session) return false;
+        const narrower = canSeePeople(session) ? void 0 : { id: { equals: session.itemId } };
+        return tenantFilter({ session }, narrower);
+      },
+      canReadOwnMember: ({ session }) => {
+        if (!session) return false;
+        const narrower = canSeePeople(session) ? void 0 : { user: { id: { equals: session.itemId } } };
+        return tenantFilter({ session }, narrower);
+      },
+      canUpdateMember: ({ session }) => {
+        if (!session) return false;
+        const narrower = canEditPeople(session) ? void 0 : { user: { id: { equals: session.itemId } } };
+        return tenantFilter({ session }, narrower);
+      },
+      canReadOwnMembership: ({ session }) => ownerFilter(session, { member: { id: { equals: session?.itemId } } }),
+      canReadOwnMemberResource: ({ session }) => ownerFilter(session, { member: { user: { id: { equals: session?.itemId } } } }),
+      canReadOwnPaymentSession: ({ session }) => ownerFilter(session, { user: { id: { equals: session?.itemId } } }),
+      canReadOwnPaymentSessionField: ({ session, item }) => Boolean(session && (isOperatorSession(session) || item?.userId === session.itemId)),
+      canReadOwnMemberField: ({ session, item }) => Boolean(
+        session && tenantItemAccess({ session, item }) && (isOperatorSession(session) || item?.userId === session.itemId)
+      ),
+      canReadOwnBooking: ({ session }) => {
+        if (!session) return false;
+        const memberFilter = { member: { user: { id: { equals: session.itemId } } } };
+        if (isOperatorSession(session)) return tenantFilter({ session });
+        if (!session.data.role?.isInstructor) return tenantFilter({ session }, memberFilter);
+        return tenantFilter({ session }, { OR: [memberFilter, { classInstance: {
+          OR: [
+            { instructor: { user: { id: { equals: session.itemId } }, isActive: { equals: true } } },
+            { AND: [{ instructor: null }, { classSchedule: { instructor: { user: { id: { equals: session.itemId } }, isActive: { equals: true } } } }] }
+          ]
+        } }] });
+      },
+      canReadOwnAttendance: ({ session }) => {
+        if (!session) return false;
+        const memberFilter = { member: { user: { id: { equals: session.itemId } } } };
+        if (isOperatorSession(session)) return tenantFilter({ session });
+        if (!session.data.role?.isInstructor) return tenantFilter({ session }, memberFilter);
+        return tenantFilter({ session }, { OR: [memberFilter, { booking: { classInstance: {
+          OR: [
+            { instructor: { user: { id: { equals: session.itemId } }, isActive: { equals: true } } },
+            { AND: [{ instructor: null }, { classSchedule: { instructor: { user: { id: { equals: session.itemId } }, isActive: { equals: true } } } }] }
+          ]
+        } } }] });
+      },
+      // Role managers list the tenant's roles they may assign; everyone else reads their own role.
+      canReadOwnRole: ({ session }) => {
+        if (!session) return false;
+        const narrower = isOperatorSession(session) || session.data.role?.canManageRoles ? void 0 : { assignedTo: { some: { id: { equals: session.itemId } } } };
+        return tenantFilter({ session }, narrower);
+      },
+      // Members keep reading templates and sessions they booked after a pause or
+      // cancellation, so booking history retains the class name and date.
+      canReadClassSchedule: ({ session }) => tenantFilter(
+        { session },
+        isOperatorSession(session) ? void 0 : session?.itemId ? { OR: [{ isActive: { equals: true } }, { instances: { some: { bookings: { some: ownBookingFilter(session) } } } }] } : { isActive: { equals: true } }
+      ),
+      canReadInstructor: ({ session }) => tenantFilter(
+        { session },
+        isOperatorSession(session) ? void 0 : { isActive: { equals: true } }
+      ),
+      canReadClassInstance: ({ session }) => tenantFilter(
+        { session },
+        isOperatorSession(session) ? void 0 : session?.itemId ? { OR: [{ isCancelled: { equals: false } }, { bookings: { some: ownBookingFilter(session) } }] } : { isCancelled: { equals: false } }
+      ),
+      // Backward-compatible aliases for the existing User/Member update boundaries.
+      canReadPeople: ({ session }) => {
+        if (!session) return false;
+        return tenantFilter(
+          { session },
+          canSeePeople(session) ? void 0 : { id: { equals: session.itemId } }
+        );
+      },
+      // Contact details of same-tenant people; login email, password and role keep their own field rules.
+      canUpdatePeople: ({ session }) => {
+        if (!session) return false;
+        return tenantFilter(
+          { session },
+          canEditPeople(session) ? void 0 : { id: { equals: session.itemId } }
+        );
+      },
+      canDeletePeople: ({ session }) => {
+        if (!session || !session.data?.role?.canManagePeople) return false;
+        return tenantFilter({ session });
+      }
+    };
+  }
+});
+
+// features/keystone/models/trackingFields.ts
+var import_fields, trackingFields;
+var init_trackingFields = __esm({
+  "features/keystone/models/trackingFields.ts"() {
+    "use strict";
+    import_fields = require("@keystone-6/core/fields");
+    trackingFields = {
+      createdAt: (0, import_fields.timestamp)({
+        access: { read: () => true, create: () => false, update: () => false },
+        validation: { isRequired: true },
+        defaultValue: { kind: "now" },
+        ui: {
+          createView: { fieldMode: "hidden" },
+          itemView: { fieldMode: "read" }
+        }
+      }),
+      updatedAt: (0, import_fields.timestamp)({
+        access: { read: () => true, create: () => false, update: () => false },
+        db: { updatedAt: true },
+        validation: { isRequired: true },
+        defaultValue: { kind: "now" },
+        ui: {
+          createView: { fieldMode: "hidden" },
+          itemView: { fieldMode: "read" }
+        }
+      })
+    };
+  }
+});
+
 // features/keystone/lib/prisma-result.ts
 function throwOnKeystonePrismaError(result, operation = "Prisma operation") {
   if (result instanceof Error) throw result;
@@ -101,14 +299,129 @@ var init_prisma_result = __esm({
   }
 });
 
-// features/keystone/lib/participation-terms.ts
-function isParticipationTermsPlaceholder(text42) {
-  const normalize = (value) => value.replace(/[‘’]/g, "'").replace(/\s+/g, " ").trim().toLowerCase();
-  return normalize(text42) === normalize(PARTICIPATION_TERMS_PLACEHOLDER);
+// features/keystone/models/tenantRelationships.ts
+function requiredRelationshipDb(relationName) {
+  return (field) => field.replace(new RegExp(`(${relationName}\\s+\\w+)\\?`), "$1").replace(new RegExp(`(${relationName}Id\\s+String)\\?`), "$1");
 }
-async function publishParticipationTerms(tx, organizationId, text42, publishedBy) {
+function restrictDeleteDb(field) {
+  return field.replace(/@relation\(([^)]*fields:[^)]*)\)/, "@relation($1, onDelete: Restrict)");
+}
+function compoundUniqueDb(...constraints) {
+  return (schema) => {
+    const additions = constraints.map((constraint) => `  @@unique([${constraint}])`).join("\n");
+    return schema.replace(/\n}/, `
+${additions}
+}`);
+  };
+}
+function connectedRelationshipId(value) {
+  if (!value || typeof value !== "object") return void 0;
+  const relationship41 = value;
+  if (relationship41.disconnect) return null;
+  return typeof relationship41.connect?.id === "string" ? relationship41.connect.id : void 0;
+}
+function tenantOrganizationId(resolvedData, item) {
+  const connected = connectedRelationshipId(resolvedData.organization);
+  if (connected !== void 0) return connected;
+  return item?.organizationId ?? void 0;
+}
+function validateTenantOwnership(targets, options = {}) {
+  return async function validateTenantOwnershipInput({
+    resolvedData,
+    item,
+    context,
+    addValidationError,
+    session,
+    operation
+  }) {
+    const sessionOrganizationId = argsSessionOrganizationId({ session, context });
+    const requireOrganization = options.requireOrganization ?? true;
+    if (operation === "create" && resolvedData.organization === void 0 && sessionOrganizationId) {
+      resolvedData.organization = { connect: { id: sessionOrganizationId } };
+    } else if (operation === "create" && resolvedData.organization === void 0 && !requireOrganization) {
+      const [defaultOrganization] = await context.sudo().query.Organization.findMany({
+        take: 1,
+        orderBy: [{ createdAt: "asc" }],
+        query: "id"
+      });
+      if (defaultOrganization?.id) {
+        resolvedData.organization = { connect: { id: defaultOrganization.id } };
+      }
+    }
+    const organizationId = tenantOrganizationId(resolvedData, item);
+    if (!organizationId && requireOrganization) {
+      addValidationError("A tenant organization is required");
+      return;
+    }
+    if (!organizationId) return;
+    if (sessionOrganizationId && sessionOrganizationId !== organizationId) {
+      addValidationError("The relationship must belong to the signed-in organization");
+      return;
+    }
+    if (resolvedData.organization !== void 0) {
+      const connectedOrganizationId = connectedRelationshipId(resolvedData.organization);
+      if (connectedOrganizationId !== organizationId) {
+        addValidationError("The tenant organization cannot be reassigned");
+        return;
+      }
+    }
+    const prisma = guardKeystonePrismaResults(context.prisma);
+    for (const target of targets) {
+      const relationshipValue = resolvedData[target.field];
+      const relationshipId = relationshipValue === void 0 ? item?.[`${target.field}Id`] : connectedRelationshipId(relationshipValue);
+      if (!relationshipId) {
+        if (target.required) addValidationError(`${target.field} is required`);
+        continue;
+      }
+      const related = await prisma[target.list].findUnique({
+        where: { id: relationshipId },
+        select: { id: true, organizationId: true }
+      });
+      if (!related) {
+        addValidationError(`${target.field} was not found`);
+      } else if (related.organizationId !== organizationId) {
+        addValidationError(`${target.field} must belong to the same organization`);
+      }
+    }
+  };
+}
+function argsSessionOrganizationId(args) {
+  const id = (args?.session ?? args?.context?.session)?.data?.organization?.id;
+  return typeof id === "string" && id.length > 0 ? id : null;
+}
+async function validateResourceLocation({
+  resolvedData,
+  item,
+  context,
+  addValidationError
+}) {
+  const locationId = resolvedData.location === void 0 ? item?.locationId : connectedRelationshipId(resolvedData.location);
+  const resourceId = resolvedData.resource === void 0 ? item?.resourceId : connectedRelationshipId(resolvedData.resource);
+  if (!locationId || !resourceId) return;
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const resource = await prisma.room.findUnique({
+    where: { id: resourceId },
+    select: { locationId: true }
+  });
+  if (resource && resource.locationId !== locationId) {
+    addValidationError("resource must belong to the selected location");
+  }
+}
+var init_tenantRelationships = __esm({
+  "features/keystone/models/tenantRelationships.ts"() {
+    "use strict";
+    init_prisma_result();
+  }
+});
+
+// features/keystone/lib/participation-terms.ts
+function isParticipationTermsPlaceholder(text43) {
+  const normalize = (value) => value.replace(/[‘’]/g, "'").replace(/\s+/g, " ").trim().toLowerCase();
+  return normalize(text43) === normalize(PARTICIPATION_TERMS_PLACEHOLDER);
+}
+async function publishParticipationTerms(tx, organizationId, text43, publishedBy) {
   await lockParticipationPolicy(tx, organizationId);
-  const body = text42.trim();
+  const body = text43.trim();
   const enforce = Boolean(body) && !isParticipationTermsPlaceholder(body);
   const latest = await tx.participationPolicy.findFirst({ where: { organizationId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
   if (latest && latest.documentReference === PARTICIPATION_TERMS_PATH && latest.documentText === body && latest.enforceWaiver === enforce) return latest;
@@ -384,7 +697,7 @@ async function reviewFutureMembershipBookings(tx, membership) {
   const bookings = await tx.classBooking.findMany({ where: {
     organizationId: membership.organizationId,
     member: { userId: membership.memberId },
-    status: { in: ["confirmed", "waitlist"] },
+    status: { in: ["confirmed", "waitlisted"] },
     classInstance: { date: { gt: /* @__PURE__ */ new Date() } }
   }, include: { classInstance: true, member: { select: { status: true } } }, take: 1e3 });
   for (const booking of bookings) {
@@ -439,7 +752,7 @@ async function refreshScopedMembership(prisma, organizationId, membershipId) {
       }
     } else reason = `Member ${member.status}; membership ${membership.status}`;
     const reviewed = await reviewFutureMembershipBookings(tx, membership);
-    if (member.status !== "active") await tx.classBooking.updateMany({ where: { organizationId, memberId: member.id, status: { in: ["confirmed", "waitlist"] }, classInstance: { date: { gt: now } } }, data: { eligibilityReviewReason: `Member account is ${member.status}` } });
+    if (member.status !== "active") await tx.classBooking.updateMany({ where: { organizationId, memberId: member.id, status: { in: ["confirmed", "waitlisted"] }, classInstance: { date: { gt: now } } }, data: { eligibilityReviewReason: `Member account is ${member.status}` } });
     return { refreshed, reason, membershipId, reviewed, reviewLimitReached: reviewed >= 1e3 };
   });
 }
@@ -510,6 +823,75 @@ var init_current_actor = __esm({
   }
 });
 
+// features/keystone/lib/spots.ts
+function classCapacityMode(instance) {
+  const mode = instance?.classSchedule?.classType?.capacityMode;
+  return mode === "first_come" ? "first_come" : "pick_a_spot";
+}
+function classRoomId(instance) {
+  return instance?.resourceId ?? instance?.resource?.id ?? instance?.classSchedule?.resourceId ?? instance?.classSchedule?.resource?.id ?? null;
+}
+function spotInService(spot, at) {
+  if (!spot || spot.retiredAt || !spot.isBookable) return false;
+  const from = spot.outOfServiceFrom ? new Date(spot.outOfServiceFrom) : null;
+  const until = spot.outOfServiceUntil ? new Date(spot.outOfServiceUntil) : null;
+  if (from && from <= at && (!until || until > at)) return false;
+  return true;
+}
+async function bookableSpots(tx, instance) {
+  tx = guardKeystonePrismaResults(tx);
+  const roomId = classRoomId(instance);
+  if (!roomId) return [];
+  const spots = await tx.spot.findMany({ where: { roomId, organizationId: instance.organizationId, retiredAt: null }, orderBy: [{ number: "asc" }, { id: "asc" }], take: 500 });
+  const at = new Date(instance.date);
+  return spots.filter((spot) => spotInService(spot, at));
+}
+async function takenSpots(tx, instance) {
+  tx = guardKeystonePrismaResults(tx);
+  const rows = await tx.classBooking.findMany({ where: { classInstanceId: instance.id, organizationId: instance.organizationId, status: "confirmed" }, select: { id: true, spotId: true }, take: 1e3 });
+  const taken = /* @__PURE__ */ new Map();
+  for (const row of rows) if (row.spotId) taken.set(row.spotId, row.id);
+  return { taken, confirmed: rows.length };
+}
+async function classCapacity(tx, instance, declared) {
+  if (classCapacityMode(instance) === "first_come") return { mode: "first_come", capacity: declared, spots: [] };
+  const spots = await bookableSpots(tx, instance);
+  const explicit = instance?.maxCapacity;
+  const capacity = Number.isInteger(explicit) && explicit > 0 ? Math.min(explicit, spots.length) : spots.length;
+  return { mode: "pick_a_spot", capacity, spots };
+}
+function chooseSpot(spots, taken, requestedSpotId) {
+  if (requestedSpotId) {
+    const spot = spots.find((candidate) => candidate.id === requestedSpotId);
+    if (!spot) throw new Error("That machine is not available for this class. Choose another.");
+    if (taken.has(spot.id)) throw new Error(`${spot.label} was just taken. Choose another machine.`);
+    return spot;
+  }
+  return spots.find((candidate) => !taken.has(candidate.id)) ?? null;
+}
+function historyEntry(action, extra = {}) {
+  return { action, at: (/* @__PURE__ */ new Date()).toISOString(), ...extra };
+}
+function appendHistory(previous, entry) {
+  const list43 = Array.isArray(previous) ? previous : [];
+  return [...list43.slice(-99), entry];
+}
+async function waitlistCutoffMinutes(tx, organizationId) {
+  tx = guardKeystonePrismaResults(tx);
+  const settings = await tx.studioSettings.findFirst({ where: { organizationId }, orderBy: [{ createdAt: "asc" }], select: { waitlistCutoffMinutes: true } });
+  const minutes = Number(settings?.waitlistCutoffMinutes ?? 120);
+  return Number.isInteger(minutes) && minutes >= 0 ? minutes : 120;
+}
+function insideWaitlistCutoff(classStart, now, cutoffMinutes) {
+  return classStart.getTime() - now.getTime() < cutoffMinutes * 6e4;
+}
+var init_spots = __esm({
+  "features/keystone/lib/spots.ts"() {
+    "use strict";
+    init_prisma_result();
+  }
+});
+
 // features/keystone/security/internalIdentity.ts
 var import_node_crypto3;
 var init_internalIdentity = __esm({
@@ -555,12 +937,12 @@ function verifiedInternalIdentity(headers, socketAddress, secret = String(proces
   const loopback = /^(?:127\.|::1$|::ffff:127\.)/.test(String(socketAddress || ""));
   if (!loopback || secret.length < 32) return null;
   const identity = header(headers, "x-openfront-client-identity");
-  const timestamp30 = header(headers, "x-openfront-client-timestamp");
+  const timestamp31 = header(headers, "x-openfront-client-timestamp");
   const signature = header(headers, "x-openfront-client-signature");
-  if (!/^[a-f0-9]{64}$/.test(identity) || !/^\d{10}$/.test(timestamp30) || !/^[a-f0-9]{64}$/.test(signature)) return null;
-  const age = Math.abs(now - Number(timestamp30) * 1e3);
+  if (!/^[a-f0-9]{64}$/.test(identity) || !/^\d{10}$/.test(timestamp31) || !/^[a-f0-9]{64}$/.test(signature)) return null;
+  const age = Math.abs(now - Number(timestamp31) * 1e3);
   if (!Number.isFinite(age) || age > INTERNAL_IDENTITY_MAX_AGE_MS) return null;
-  const expected = (0, import_node_crypto4.createHmac)("sha256", secret).update(`${timestamp30}:${identity}`).digest("hex");
+  const expected = (0, import_node_crypto4.createHmac)("sha256", secret).update(`${timestamp31}:${identity}`).digest("hex");
   return safeEqual(signature, expected) ? `forwarded:${identity}` : null;
 }
 function railwayEdgeSource(headers, socketAddress) {
@@ -907,7 +1289,7 @@ async function deliverBookingConfirmation(prisma, bookingId, send) {
         const zone = booking.organization?.timezone || "UTC";
         const name = booking.classInstance?.classSchedule?.name || "your class";
         const place = booking.classInstance?.location?.name || booking.classInstance?.classSchedule?.location?.name;
-        const waitlisted = booking.status === "waitlist";
+        const waitlisted = booking.status === "waitlisted";
         const publicAppUrl2 = (path) => publicAppUrl(path);
         return {
           to: booking.memberEmail,
@@ -1124,8 +1506,9 @@ async function createCapacityControlledBookingInTransaction(transaction, input) 
             startTime: true,
             endTime: true,
             isActive: true,
+            resourceId: true,
             resource: PHYSICAL_RESOURCE,
-            classType: { select: { id: true, name: true } },
+            classType: { select: { id: true, name: true, capacityMode: true } },
             location: { select: { id: true, name: true, address: true, isActive: true } },
             instructor: { select: { id: true, user: { select: { name: true } } } }
           }
@@ -1155,7 +1538,7 @@ async function createCapacityControlledBookingInTransaction(transaction, input) 
         classInstanceId: input.classInstanceId,
         memberId: input.memberId,
         organizationId: input.actorOrganizationId,
-        status: { in: ["confirmed", "waitlist"] }
+        status: { in: ["confirmed", "waitlisted"] }
       },
       select: { id: true }
     });
@@ -1177,30 +1560,24 @@ async function createCapacityControlledBookingInTransaction(transaction, input) 
       throw new Error("No class credits remaining");
     }
     const maximumBookings = membership ? membership.agreementSnapshot?.maxClassBookings ?? membership.tier?.maxClassBookings ?? 0 : 0;
-    if (maximumBookings > 0 && await transaction.classBooking.count({ where: { organizationId: input.actorOrganizationId, memberId: member.id, status: { in: ["confirmed", "waitlist"] }, classInstance: { date: { gt: /* @__PURE__ */ new Date() } } } }) >= maximumBookings) throw new Error("Membership concurrent booking limit reached");
+    if (maximumBookings > 0 && await transaction.classBooking.count({ where: { organizationId: input.actorOrganizationId, memberId: member.id, status: { in: ["confirmed", "waitlisted"] }, classInstance: { date: { gt: /* @__PURE__ */ new Date() } } } }) >= maximumBookings) throw new Error("Membership concurrent booking limit reached");
     await fillReleasedSeats(transaction, input.classInstanceId, input.actorOrganizationId);
     if (effectivePhysicalResource(classInstance)?.isActive === false) throw new Error("This class's room is closed for new bookings");
-    const capacity = effectiveSessionCapacity(classInstance);
-    const confirmedCount = await transaction.classBooking.count({
-      where: {
-        classInstanceId: input.classInstanceId,
-        organizationId: input.actorOrganizationId,
-        status: "confirmed"
-      }
-    });
+    const { mode, capacity, spots } = await classCapacity(transaction, classInstance, effectiveSessionCapacity(classInstance));
+    const { taken, confirmed: confirmedCount } = await takenSpots(transaction, classInstance);
     const atCapacity = confirmedCount >= capacity;
     if (atCapacity && dropIn) throw new Error(DROP_IN_CLASS_FULL);
     if (atCapacity && input.capacityMode === "reject") {
       throw new Error("Class is at capacity, cannot process walk-in");
     }
-    const waitlistPosition = atCapacity ? await transaction.classBooking.count({
-      where: {
-        classInstanceId: input.classInstanceId,
-        organizationId: input.actorOrganizationId,
-        status: "waitlist"
-      }
-    }) + 1 : null;
-    const status = atCapacity ? "waitlist" : "confirmed";
+    const spot = !atCapacity && mode === "pick_a_spot" ? chooseSpot(spots, taken, input.spotId ?? null) : null;
+    if (!atCapacity && mode === "pick_a_spot" && !spot) throw new Error("No machine is free in this class");
+    if (atCapacity && input.spotId) throw new Error("This class is full. Join the waitlist instead.");
+    const waitlistPosition = atCapacity ? ((await transaction.classBooking.aggregate({
+      where: { classInstanceId: input.classInstanceId, organizationId: input.actorOrganizationId, status: "waitlisted" },
+      _max: { waitlistPosition: true }
+    }))._max?.waitlistPosition ?? 0) + 1 : null;
+    const status = atCapacity ? "waitlisted" : "confirmed";
     if (status === "confirmed") await assertNoMemberServiceConflict(transaction, member.id, input.actorOrganizationId, classInstance);
     await lockActiveOrganization(transaction, input.actorOrganizationId);
     const booking = await transaction.classBooking.create({
@@ -1214,6 +1591,9 @@ async function createCapacityControlledBookingInTransaction(transaction, input) 
         serviceSnapshot: bookingServiceSnapshot(classInstance, { unlimited, status, membership, grant, participation, dropIn }),
         status,
         activeBookingKey: "active",
+        spotId: spot?.id ?? null,
+        activeSpotKey: spot ? "active" : null,
+        history: [historyEntry(status === "confirmed" ? "booked" : "joined", { by: input.actorUserId, spotId: spot?.id ?? null, spotLabel: spot?.label ?? null, waitlistPosition })],
         waitlistPosition,
         bookedAt: /* @__PURE__ */ new Date()
       },
@@ -1229,6 +1609,8 @@ async function createCapacityControlledBookingInTransaction(transaction, input) 
     });
     return {
       bookingId: booking.id,
+      spotId: spot?.id ?? null,
+      spotLabel: spot?.label ?? null,
       status,
       waitlistPosition,
       creditsRemaining: dropIn ? 0 : unlimited ? -1 : currentCredits - (status === "confirmed" ? 1 : 0)
@@ -1277,20 +1659,21 @@ function bookingServiceSnapshot(classInstance, terms) {
     participation: terms.participation
   };
 }
-async function fillReleasedSeats(transaction, classInstanceId, organizationId) {
-  const waiting = await guardKeystonePrismaResults(transaction).classBooking.count({ where: { classInstanceId, organizationId, status: "waitlist" } });
+async function fillReleasedSeats(transaction, classInstanceId, organizationId, preferredSpotId = null) {
+  const waiting = await guardKeystonePrismaResults(transaction).classBooking.count({ where: { classInstanceId, organizationId, status: "waitlisted" } });
   for (let promoted = 0; promoted < waiting; promoted += 1) {
-    const result = await promoteCapacityControlledWaitlistBookingInTransaction(transaction, classInstanceId, organizationId, true);
+    const result = await promoteCapacityControlledWaitlistBookingInTransaction(transaction, classInstanceId, organizationId, true, { preferredSpotId: promoted === 0 ? preferredSpotId : null });
     if (!result.promoted) break;
   }
 }
-async function promoteCapacityControlledWaitlistBooking(prisma, classInstanceId, organizationId) {
+async function promoteCapacityControlledWaitlistBooking(prisma, classInstanceId, organizationId, options = {}) {
   prisma = guardKeystonePrismaResults(prisma);
   return prisma.$transaction(
-    (transaction) => promoteCapacityControlledWaitlistBookingInTransaction(transaction, classInstanceId, organizationId)
+    (transaction) => promoteCapacityControlledWaitlistBookingInTransaction(transaction, classInstanceId, organizationId, false, { ...options, manual: true })
   );
 }
-async function promoteCapacityControlledWaitlistBookingInTransaction(transaction, classInstanceId, organizationId, locksAlreadyHeld = false) {
+async function promoteCapacityControlledWaitlistBookingInTransaction(transaction, classInstanceId, organizationId, locksAlreadyHeld = false, options = {}) {
+  const { preferredSpotId = null, manual = false, onlyBookingId = null } = options;
   transaction = guardKeystonePrismaResults(transaction);
   if (!locksAlreadyHeld) {
     await lockParticipationPolicy(transaction, organizationId);
@@ -1301,7 +1684,7 @@ async function promoteCapacityControlledWaitlistBookingInTransaction(transaction
     include: {
       location: { select: { isActive: true } },
       resource: PHYSICAL_RESOURCE,
-      classSchedule: { select: { maxCapacity: true, startTime: true, endTime: true, isActive: true, location: { select: { isActive: true } }, resource: PHYSICAL_RESOURCE } }
+      classSchedule: { select: { maxCapacity: true, startTime: true, endTime: true, isActive: true, resourceId: true, location: { select: { isActive: true } }, resource: PHYSICAL_RESOURCE, classType: { select: { capacityMode: true } } } }
     }
   });
   if (!classInstance) throw new Error("Class instance not found");
@@ -1314,16 +1697,19 @@ async function promoteCapacityControlledWaitlistBookingInTransaction(transaction
   if (classInstance.date.getTime() <= Date.now()) {
     return { promoted: false, message: "Past classes cannot promote a waitlist" };
   }
-  const capacity = effectiveSessionCapacity(classInstance);
-  const confirmedCount = await transaction.classBooking.count({
-    where: { classInstanceId, organizationId, status: "confirmed" }
-  });
+  if (!manual && insideWaitlistCutoff(classInstance.date, /* @__PURE__ */ new Date(), await waitlistCutoffMinutes(transaction, organizationId))) {
+    return { promoted: false, message: "Inside the waitlist cutoff; the machine is open to book" };
+  }
+  const { mode, capacity, spots } = await classCapacity(transaction, classInstance, effectiveSessionCapacity(classInstance));
+  const { taken, confirmed: confirmedCount } = await takenSpots(transaction, classInstance);
   if (confirmedCount >= capacity) {
     return { promoted: false, message: "Class is already at capacity" };
   }
+  const spot = mode === "pick_a_spot" ? preferredSpotId && spots.some((s) => s.id === preferredSpotId) && !taken.has(preferredSpotId) ? spots.find((s) => s.id === preferredSpotId) : chooseSpot(spots, taken, null) : null;
+  if (mode === "pick_a_spot" && !spot) return { promoted: false, message: "No machine is free" };
   const candidates = await transaction.classBooking.findMany({
-    where: { classInstanceId, organizationId, status: "waitlist" },
-    orderBy: [{ bookedAt: "asc" }, { id: "asc" }],
+    where: { classInstanceId, organizationId, status: "waitlisted", ...onlyBookingId ? { id: onlyBookingId } : {} },
+    orderBy: [{ waitlistPosition: "asc" }, { bookedAt: "asc" }, { id: "asc" }],
     take: 1e4,
     include: {
       member: { include: { user: { select: { id: true } } } }
@@ -1356,14 +1742,12 @@ async function promoteCapacityControlledWaitlistBookingInTransaction(transaction
       await assertNoMemberServiceConflict(transaction, candidate.memberId, organizationId, classInstance);
       const grant = await ensureMonthlyCreditGrant(transaction, lockedMembership, classInstance.date);
       if (grant.allowance !== -1 && grant.remaining <= 0) {
-        if (candidate.eligibilityReviewReason) {
-          await transaction.classBooking.update({ where: { id: candidate.id }, data: { eligibilityReviewReason: "" } });
-        }
+        await transaction.classBooking.update({ where: { id: candidate.id }, data: { eligibilityReviewReason: "", history: appendHistory(candidate.history, historyEntry("skipped", { reason: "no usable credit" })) } });
         continue;
       }
     } catch (error) {
       if (!(error instanceof Error) || !/Membership|membership|Service is outside|waiver|Waiver|closure|closed|participation|Adult age verification|Registered participant verification|overlapping private appointment|overlapping class/i.test(error.message)) throw error;
-      await transaction.classBooking.update({ where: { id: candidate.id }, data: { eligibilityReviewReason: error.message } });
+      await transaction.classBooking.update({ where: { id: candidate.id }, data: { eligibilityReviewReason: error.message, history: appendHistory(candidate.history, historyEntry("skipped", { reason: error.message })) } });
       continue;
     }
     booking = candidate;
@@ -1375,17 +1759,16 @@ async function promoteCapacityControlledWaitlistBookingInTransaction(transaction
   }
   await transaction.classBooking.update({
     where: { id: booking.id },
-    data: { status: "confirmed", waitlistPosition: null, eligibilityReviewReason: "" }
+    data: {
+      status: "confirmed",
+      waitlistPosition: null,
+      eligibilityReviewReason: "",
+      spotId: spot?.id ?? null,
+      activeSpotKey: spot ? "active" : null,
+      history: appendHistory(booking.history, historyEntry("promoted", { manual, spotId: spot?.id ?? null, spotLabel: spot?.label ?? null }))
+    }
   });
   await debitBookingCredit(transaction, membership, booking.id, classInstance.date);
-  const remaining = await transaction.classBooking.findMany({
-    where: { classInstanceId, organizationId, status: "waitlist" },
-    orderBy: [{ bookedAt: "asc" }, { id: "asc" }],
-    select: { id: true }
-  });
-  for (let index = 0; index < remaining.length; index++) {
-    await transaction.classBooking.update({ where: { id: remaining[index].id }, data: { waitlistPosition: index + 1 } });
-  }
   const promotionNotice = await enqueueOperationalNotice(transaction, {
     organizationId,
     memberId: booking.memberId,
@@ -1394,7 +1777,7 @@ async function promoteCapacityControlledWaitlistBookingInTransaction(transaction
     message: "A waitlist place opened. Your booking is now confirmed and any required credit has been reserved for this class."
   });
   if (promotionNotice instanceof Error) throw promotionNotice;
-  return { promoted: true, bookingId: booking.id, message: "Member promoted from waitlist" };
+  return { promoted: true, bookingId: booking.id, spotId: spot?.id ?? null, message: "Member promoted from waitlist" };
 }
 async function assertNoMemberServiceConflict(tx, memberId, organizationId, instance) {
   tx = guardKeystonePrismaResults(tx);
@@ -1422,8 +1805,1014 @@ var init_classCapacity = __esm({
     init_operational_notices();
     init_prisma_result();
     init_current_actor();
+    init_spots();
     PHYSICAL_RESOURCE = { select: { capacity: true, isActive: true } };
     DROP_IN_CLASS_FULL = "This class filled up before your drop-in payment completed";
+  }
+});
+
+// features/keystone/lib/lifecycles.ts
+function canTransition(machine, from, to) {
+  if (from === to) return true;
+  return Boolean(machine[from]?.has(to));
+}
+function assertTransition(machine, label, from, to) {
+  if (!Object.hasOwn(machine, from)) throw new Error(`Unknown ${label} status: ${from}`);
+  if (!Object.hasOwn(machine, to)) throw new Error(`Unknown ${label} status: ${to}`);
+  if (!canTransition(machine, from, to)) throw new Error(`Invalid ${label} status transition: ${from} -> ${to}`);
+}
+function settleTransition(machine, from, to) {
+  if (!from || !Object.hasOwn(machine, from)) return to;
+  return canTransition(machine, from, to) ? to : from;
+}
+var m, MEMBERSHIP_MACHINE, SUBSCRIPTION_MACHINE, BOOKING_MACHINE, MEMBER_ACCOUNT_MACHINE, GIFT_CARD_MACHINE, TRAINING_PACKAGE_MACHINE, PAYMENT_SESSION_MACHINE;
+var init_lifecycles = __esm({
+  "features/keystone/lib/lifecycles.ts"() {
+    "use strict";
+    m = (table) => Object.fromEntries(Object.entries(table).map(([from, to]) => [from, new Set(to)]));
+    MEMBERSHIP_MACHINE = m({
+      active: ["frozen", "cancelled", "expired", "past-due"],
+      frozen: ["active", "cancelled", "expired", "past-due"],
+      "past-due": ["active", "frozen", "cancelled", "expired"],
+      expired: ["active", "frozen", "past-due", "cancelled"],
+      cancelled: []
+    });
+    SUBSCRIPTION_MACHINE = m({
+      active: ["paused", "past_due", "cancelled"],
+      paused: ["active", "past_due", "cancelled"],
+      past_due: ["active", "paused", "cancelled"],
+      cancelled: []
+    });
+    BOOKING_MACHINE = m({
+      // Dissertation 4.2. attended|no_show -> confirmed is staff undo, refused once the pay line is locked.
+      confirmed: ["cancelled", "late_cancelled", "attended", "no_show"],
+      waitlisted: ["confirmed", "cancelled"],
+      attended: ["confirmed"],
+      no_show: ["confirmed"],
+      late_cancelled: [],
+      cancelled: []
+    });
+    MEMBER_ACCOUNT_MACHINE = m({
+      active: ["suspended", "cancelled"],
+      suspended: ["active", "cancelled"],
+      cancelled: []
+    });
+    GIFT_CARD_MACHINE = m({
+      active: ["redeemed", "voided"],
+      redeemed: [],
+      voided: []
+    });
+    TRAINING_PACKAGE_MACHINE = m({
+      active: ["refunded"],
+      refunded: []
+    });
+    PAYMENT_SESSION_MACHINE = m({
+      pending: ["processing", "requires_action", "completed", "failed", "expired", "cancelled"],
+      processing: ["requires_action", "completed", "failed", "expired", "cancelled"],
+      requires_action: ["processing", "completed", "failed", "expired", "cancelled"],
+      failed: ["processing", "requires_action", "expired"],
+      completed: [],
+      expired: [],
+      cancelled: []
+    });
+  }
+});
+
+// features/keystone/mutations/studioLifecyclePolicy.ts
+function assertMembershipStatusTransition(previous, next) {
+  assertTransition(MEMBERSHIP_MACHINE, "membership", previous, next);
+}
+function assertBookingStatusTransition(previous, next) {
+  assertTransition(BOOKING_MACHINE, "booking", previous, next);
+}
+function normalizeAttendanceOutcome(value) {
+  if (value === "attended" || value === "late" || value === "no-show") return value;
+  throw new Error("Attendance outcome must be attended, late, or no-show");
+}
+function normalizeCheckInMethod(value) {
+  if (value === "qr_code" || value === "rfid" || value === "manual" || value === "app") {
+    return value;
+  }
+  throw new Error("Check-in method is not supported");
+}
+function addPolicyError(addValidationError, operation) {
+  try {
+    operation();
+  } catch (error) {
+    addValidationError(error instanceof Error ? error.message : String(error));
+  }
+}
+var membershipLifecycleHooks, bookingLifecycleHooks;
+var init_studioLifecyclePolicy = __esm({
+  "features/keystone/mutations/studioLifecyclePolicy.ts"() {
+    "use strict";
+    init_lifecycles();
+    membershipLifecycleHooks = {
+      validateInput({ operation, item, resolvedData, addValidationError }) {
+        if (operation !== "update" || !item || resolvedData.status === void 0) return;
+        addPolicyError(
+          addValidationError,
+          () => assertMembershipStatusTransition(item.status, resolvedData.status)
+        );
+      }
+    };
+    bookingLifecycleHooks = {
+      validateInput({ operation, item, resolvedData, addValidationError }) {
+        if (operation !== "update" || !item || resolvedData.status === void 0) return;
+        addPolicyError(
+          addValidationError,
+          () => assertBookingStatusTransition(item.status, resolvedData.status)
+        );
+      }
+    };
+  }
+});
+
+// features/keystone/utils/storeLogo.ts
+function sanitizeStoreLogoSvg(svg) {
+  const source = svg.trim();
+  if (!source.startsWith("<svg") || !source.endsWith("</svg>") || source.length > 1e5) {
+    return "";
+  }
+  if (/<!|<\?|\b(?:javascript|data|vbscript):|\bon[a-z]+\s*=|\b(?:href|src|style)\s*=/i.test(source)) {
+    return "";
+  }
+  let tagCount = 0;
+  let match;
+  TAG_PATTERN.lastIndex = 0;
+  while (match = TAG_PATTERN.exec(source)) {
+    tagCount += 1;
+    const element = match[1].toLowerCase();
+    if (!ALLOWED_ELEMENTS.has(element)) return "";
+    if (match[0].startsWith("</")) continue;
+    const attributes = match[2];
+    let consumed = "";
+    ATTRIBUTE_PATTERN.lastIndex = 0;
+    let attributeMatch;
+    while (attributeMatch = ATTRIBUTE_PATTERN.exec(attributes)) {
+      consumed += attributeMatch[0];
+      const attribute = attributeMatch[1].toLowerCase();
+      const value = attributeMatch[2].slice(1, -1);
+      if (!ALLOWED_ATTRIBUTES.has(attribute)) return "";
+      if (attribute === "id" && !/^[A-Za-z_][\w:.-]*$/.test(value)) return "";
+      if (/url\(/i.test(value) && !/^url\(#[A-Za-z_][\w:.-]*\)$/.test(value)) return "";
+    }
+    const remainder = attributes.replace(consumed, "").replace(/\//g, "").trim();
+    if (remainder) return "";
+  }
+  TAG_PATTERN.lastIndex = 0;
+  if (tagCount === 0 || source.replace(TAG_PATTERN, "").trim()) return "";
+  return source;
+}
+var ALLOWED_ELEMENTS, ALLOWED_ATTRIBUTES, ATTRIBUTE_PATTERN, TAG_PATTERN;
+var init_storeLogo = __esm({
+  "features/keystone/utils/storeLogo.ts"() {
+    "use strict";
+    ALLOWED_ELEMENTS = /* @__PURE__ */ new Set([
+      "svg",
+      "g",
+      "path",
+      "defs",
+      "lineargradient",
+      "radialgradient",
+      "stop",
+      "clippath",
+      "rect",
+      "circle",
+      "ellipse",
+      "line",
+      "polyline",
+      "polygon",
+      "title",
+      "desc"
+    ]);
+    ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set([
+      "xmlns",
+      "fill",
+      "fill-rule",
+      "clip-rule",
+      "height",
+      "width",
+      "viewbox",
+      "d",
+      "clip-path",
+      "id",
+      "x1",
+      "x2",
+      "y1",
+      "y2",
+      "gradientunits",
+      "gradienttransform",
+      "offset",
+      "stop-color",
+      "stop-opacity",
+      "opacity",
+      "cx",
+      "cy",
+      "r",
+      "rx",
+      "ry",
+      "x",
+      "y",
+      "transform",
+      "stroke",
+      "stroke-width",
+      "stroke-linecap",
+      "stroke-linejoin",
+      "points",
+      "role",
+      "aria-hidden",
+      "aria-label",
+      "preserveaspectratio"
+    ]);
+    ATTRIBUTE_PATTERN = /\s+([A-Za-z_:][\w:.-]*)\s*=\s*("[^"]*"|'[^']*')/g;
+    TAG_PATTERN = /<\/?\s*([A-Za-z][\w:-]*)([^<>]*)>/g;
+  }
+});
+
+// features/keystone/utils/studioLogo.ts
+var init_studioLogo = __esm({
+  "features/keystone/utils/studioLogo.ts"() {
+    "use strict";
+    init_storeLogo();
+  }
+});
+
+// features/platform/store-settings/lib/icon-registry.ts
+var LOGO_ICONS;
+var init_icon_registry = __esm({
+  "features/platform/store-settings/lib/icon-registry.ts"() {
+    "use strict";
+    LOGO_ICONS = [
+      {
+        id: "3portals",
+        name: "3Portals",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g clip-rule="evenodd" fill-rule="evenodd"><path d="m34.5868 8.40061-9.6868-2.59556c-.6687-.17919-1.2108.23679-1.2108.92911v10.02854c0 .6923.5421 1.3988 1.2108 1.578l9.6868 2.5955c.6687.1792 1.2109-.2368 1.2109-.9291v-10.02848c0-.69232-.5422-1.39882-1.2109-1.57801zm-9.6868-6.35625c-2.6749-.71674-4.8434.94718-4.8434 3.71647v10.02847c0 2.7693 2.1685 5.5953 4.8434 6.312l9.6868 2.5956c2.6749.7168 4.8434-.9472 4.8434-3.7165v-10.0284c0-2.76934-2.1685-5.59533-4.8434-6.31207z" fill="#8098f9"/><path d="m26.9812 16.5707-12.1085-3.2444c-.6687-.1792-1.2109.2368-1.2109.9291v12.5356c0 .6923.5422 1.3988 1.2109 1.578l12.1085 3.2445c.6687.1792 1.2108-.2368 1.2108-.9291v-12.5356c0-.6924-.5421-1.3989-1.2108-1.5781zm-12.1085-7.0051c-2.6749-.71674-4.8434.9472-4.8434 3.7165v12.5356c0 2.7693 2.1685 5.5953 4.8434 6.312l12.1085 3.2445c2.6749.7167 4.8433-.9472 4.8433-3.7165v-12.5356c0-2.7693-2.1684-5.5953-4.8433-6.312z" fill="#6172f3"/><path d="m19.3736 24.7409-14.53021-3.8934c-.66873-.1792-1.21085.2368-1.21085.9291v15.0428c0 .6923.54212 1.3988 1.21085 1.578l14.53021 3.8933c.6687.1792 1.2108-.2368 1.2108-.9291v-15.0427c0-.6923-.5421-1.3988-1.2108-1.578zm-14.53021-7.6541c-2.67493-.7167-4.84339.9472-4.84339 3.7165v15.0427c0 2.7693 2.16846 5.5953 4.84339 6.3121l14.53021 3.8933c2.6749.7168 4.8433-.9472 4.8433-3.7164v-15.0428c0-2.7693-2.1684-5.5953-4.8433-6.312z" fill="#444ce7"/></g></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g clip-rule="evenodd" fill="#fff" fill-rule="evenodd"><path d="m34.5868 8.40061-9.6868-2.59556c-.6687-.17919-1.2108.23679-1.2108.92911v10.02854c0 .6923.5421 1.3988 1.2108 1.578l9.6868 2.5955c.6687.1792 1.2109-.2368 1.2109-.9291v-10.02848c0-.69232-.5422-1.39882-1.2109-1.57801zm-9.6868-6.35625c-2.6749-.71674-4.8434.94718-4.8434 3.71647v10.02847c0 2.7693 2.1685 5.5953 4.8434 6.312l9.6868 2.5956c2.6749.7168 4.8434-.9472 4.8434-3.7165v-10.0284c0-2.76934-2.1685-5.59533-4.8434-6.31207z" opacity=".5"/><path d="m26.9812 16.5707-12.1085-3.2444c-.6687-.1792-1.2109.2368-1.2109.9291v12.5356c0 .6923.5422 1.3988 1.2109 1.578l12.1085 3.2445c.6687.1792 1.2108-.2368 1.2108-.9291v-12.5356c0-.6924-.5421-1.3989-1.2108-1.5781zm-12.1085-7.0051c-2.6749-.71674-4.8434.9472-4.8434 3.7165v12.5356c0 2.7693 2.1685 5.5953 4.8434 6.312l12.1085 3.2445c2.6749.7167 4.8433-.9472 4.8433-3.7165v-12.5356c0-2.7693-2.1684-5.5953-4.8433-6.312z" opacity=".7"/><path d="m19.3736 24.7409-14.53021-3.8934c-.66873-.1792-1.21085.2368-1.21085.9291v15.0428c0 .6923.54212 1.3988 1.21085 1.578l14.53021 3.8933c.6687.1792 1.2108-.2368 1.2108-.9291v-15.0427c0-.6923-.5421-1.3988-1.2108-1.578zm-14.53021-7.6541c-2.67493-.7167-4.84339.9472-4.84339 3.7165v15.0427c0 2.7693 2.16846 5.5953 4.84339 6.3121l14.53021 3.8933c2.6749.7168 4.8433-.9472 4.8433-3.7164v-15.0428c0-2.7693-2.1684-5.5953-4.8433-6.312z"/></g></svg>`
+      },
+      {
+        id: "45-degrees",
+        name: "45 Degrees",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 24 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m0 15.8981h17.3455l-17.061314 17.0613 2.756374 2.7564 17.06134-17.0613v17.3455h.1104l3.7877-3.7877v-15.9638l-4.2485-4.2485h-15.96596l-3.78553995 3.7855z" fill="#155eef"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 24 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m0 15.8981h17.3455l-17.061314 17.0613 2.756374 2.7564 17.06134-17.0613v17.3455h.1104l3.7877-3.7877v-15.9638l-4.2485-4.2485h-15.96596l-3.78553995 3.7855z" fill="#155eef"/></svg>`
+      },
+      {
+        id: "acme-corp",
+        name: "Acme Corp",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 48 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m0 24c15.2548 0 24-8.7452 24-24 0 15.2548 8.7452 24 24 24-15.2548 0-24 8.7452-24 24 0-15.2548-8.7452-24-24-24z" fill="#155eef" fill-rule="evenodd"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 48 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m0 24c15.2548 0 24-8.7452 24-24 0 15.2548 8.7452 24 24 24-15.2548 0-24 8.7452-24 24 0-15.2548-8.7452-24-24-24z" fill="#155eef" fill-rule="evenodd"/></svg>`
+      },
+      {
+        id: "alphawave",
+        name: "AlphaWave",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 47 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m24.9706 7.03309c-3.1242-3.1242-8.1896-3.1242-11.3137 0l-11.31375 11.31371c-3.124199 3.1242-3.124199 8.1895 0 11.3137l11.31375 11.3137c3.1241 3.1242 8.1895 3.1242 11.3137 0l5.3982-5.3983c-4.4939-1.7337-7.682-6.0944-7.682-11.1997 0-5.3087 3.4472-9.8123 8.2254-11.3943-.0935-.0982-.1884-.1955-.2848-.292z" fill="#155eef"/><path d="m30.3691 35.5798c1.3398.5168 2.7955.8001 4.3174.8001 6.6274 0 12-5.3726 12-12s-5.3726-12-12-12c-1.3185 0-2.5873.2126-3.774.6055 5.9623 6.2681 5.8675 16.1836-.2846 22.3356z" fill="#155eef" opacity=".7"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 47 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m24.9706 7.03309c-3.1242-3.1242-8.1896-3.1242-11.3137 0l-11.31375 11.31371c-3.124199 3.1242-3.124199 8.1895 0 11.3137l11.31375 11.3137c3.1241 3.1242 8.1895 3.1242 11.3137 0l5.3982-5.3983c-4.4939-1.7337-7.682-6.0944-7.682-11.1997 0-5.3087 3.4472-9.8123 8.2254-11.3943-.0935-.0982-.1884-.1955-.2848-.292z" fill="#155eef"/><path d="m30.3691 35.5798c1.3398.5168 2.7955.8001 4.3174.8001 6.6274 0 12-5.3726 12-12s-5.3726-12-12-12c-1.3185 0-2.5873.2126-3.774.6055 5.9623 6.2681 5.8675 16.1836-.2846 22.3356z" fill="#155eef" opacity=".7"/></svg>`
+      },
+      {
+        id: "alt-shift",
+        name: "Alt+Shift",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m23.4538 34.7189c-3.1818-1.1818-6.4544-1.3636-9.4544-.5455-2.0909.5455-4.09082 1.6364-5.90897 3l-1.27273 1.0909-.36362.3636.81816.7273c.09091 0 .09092.0909.18183.1818.18181.1818.36364.2727.63636.4545l.54542.3636.54545-.4545c.09091-.0909.27273-.2727.45454-.3636 1.63636-1.3636 3.45446-2.2727 5.36356-2.7272 2.4545-.6364 5.0908-.5455 7.7271.4545 2.1818.8182 6.6363 1.8181 11.9998-.4545l.1818-.091.2728-.2727c0-.0909.0909-.0909.1818-.1818.4545-.5454.9091-1.0909 1.2727-1.7272l1.8181-2.8182-2.909 1.6363c-4.2727 2.3636-8.1817 2.8182-12.0907 1.3637z"/><path d="m10.9998 24.9011c2.4545-.6363 5.0908-.5454 7.7272.4546 2.909 1.0909 10.3634 2.6363 18.7269-4.909l1.8182-1.8182-.1819-.4545c-.0909-.3636-.2727-.8182-.4545-1.2727l-.4545-1.2727-.9091.909c-.0909.1819-.2727.2728-.4546.4546-3.9999 4.0908-10.1816 8.2726-17.2724 5.7272-3.1817-1.1818-6.4544-1.3637-9.4544-.5455-2.909.8182-5.45442 2.3636-7.81801 4.5454v-.0909l-1.363614 1.4545c0 .0909-.090891.0909-.181798.1818l-.27274.2727.090913.3637c.090908.4545.272717.909.363625 1.3636l.545454 1.4545.90907-1.1818c.09091-.1818.27272-.2727.36363-.4545 1.90905-1.7273 4.54538-4.1818 8.27257-5.1818z"/><path d="m2.1818 23.2646c2.09088-2.1818 4.45445-3.5454 6.99987-4.2727 2.45453-.6363 5.09083-.5454 7.72713.4546 8.1817 2.9999 15.2725-1.9091 18.3633-4.5454l1.1818-1.1818.4546-.3636-.3637-.5455c-.2727-.2727-.4545-.6363-.7272-1l-.5455-.7272-.6363.6363c-.0909.0909-.2727.2727-.3637.3637-3.8181 3.6363-9.7271 7.3635-16.4542 4.8181-3.1818-1.1818-6.4544-1.3637-9.4544-.5455-1.90906.5455-3.72721 1.4545-5.54536 2.6363l-1.909065 1.5455c-.181815.1818-.272722.2727-.454537.4545l-.181799.1818v.2727c-.090907.6364-.090918 1.2727-.1818259 1.8182l-.0909131 2.2727 1.54544-1.6364c.18181-.1818.36364-.4545.63636-.6363z"/><path d="m26.0908 40.9007c-.2727-.0909-.4545-.1819-.7272-.2728-3.1818-1.1818-6.4545-1.3636-9.4545-.5454-.6363.1818-1.2726.3636-1.909.6364l-2.1818.9999-.5454.2728 1.8181.6363c.5455.1818 1.0909.3637 1.6364.5455l.2727.0909.2727-.0909c.2727-.0909.5455-.2728.8182-.2728.1818 0 .3636-.0909.5454-.1818 2.1818-.5454 4.5454-.5454 7.0908.2727.2727.091.4546.1819.7273.2728l.4545.1818.2727-.0909c.6364-.1818 1.3636-.3636 1.9091-.6364l2.5454-.909-2.6363-.6364c-.2727-.0909-.6364-.1818-.9091-.2727z"/><path d="m40 22.0829-1.3636 1.3636c-.1818.1818-.3636.3636-.5454.5454-3.7272 3.5454-9.7271 7.3635-16.4543 4.8181-3.1818-1.1818-6.4544-1.3636-9.4544-.5454-2.81811.8182-5.36354 2.2727-7.63623 4.4545l-1.18179 1.2727-.36362.4545.36362.5454c.27273.3637.45455.6364.63637 1l.54542.8182.63636-.8182c.09091-.0909.27272-.2727.36363-.3636 2.18178-2.3636 4.54534-3.8181 7.27264-4.5454 2.4545-.6364 5.0908-.5454 7.7271.4545 2.2727.8182 4.6363 1.0909 6.9999.8182 4.1817-.4545 8.3635-2.8181 11.4543-5.4544.1819-.1818.3636-.2727.5455-.4546l.2727-.2727v-.2727c0-.5455.0909-1.1818.0909-1.7273z"/><path d="m5.45373 13.7196c.54545-.2728 1.18182-.4546 1.72726-.6364 2.45451-.6364 5.09081-.5455 7.72711.4545 1.7273.6364 3.4545.9091 5.3636.9091 3.8181 0 7.6362-1.3636 11.1816-3.9999l1.8181-1.45455-.8181-.63636c-.2727-.27273-.6364-.54544-1-.72725l-.5455-.36363-.4545.36363c-.1818.09091-.2727.27272-.4545.36362-4.8181 3.63634-9.6362 4.63634-14.1816 2.90904-3.2727-1.18178-6.54535-1.45451-9.81802-.4545-.27272.0909-.54544.1818-.90907.2727l-.1818.0909-.27274.2727c0 .0909-.09089.0909-.1818.1818-.36363.5455-.81818 1-1.18181 1.5455l-1.72724 2.6363 2.81814-1.4545c.45453 0 .81815-.1818 1.09087-.2727z"/><path d="m12.9089 7.53769.2727.09091c1.1818.45454 3 .90907 5.2726.90907 2.3636 0 4.6363-.54545 6.909-1.45452l2.8181-1.36361-1.909-.63634c-.5454-.18182-1.0909-.36363-1.7273-.45454h-.2727l-.2727.09089c-.2727.0909-.5455.27274-.8182.36365-2.7272.99998-5.4544 1.1818-8.0907.45454-.2728-.09091-.5455-.18183-.8182-.27274l-.2727-.09091-.2728.09091c-.5454.18181-1.0908.36364-1.6363.63636l-2.09087.90908 2.18177.63633c.1818-.0909.4546.00001.7273.09092z"/></g></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m23.4538 34.7189c-3.1818-1.1818-6.4544-1.3636-9.4544-.5455-2.0909.5455-4.09082 1.6364-5.90897 3l-1.27273 1.0909-.36362.3636.81816.7273c.09091 0 .09092.0909.18183.1818.18181.1818.36364.2727.63636.4545l.54542.3636.54545-.4545c.09091-.0909.27273-.2727.45454-.3636 1.63636-1.3636 3.45446-2.2727 5.36356-2.7272 2.4545-.6364 5.0908-.5455 7.7271.4545 2.1818.8182 6.6363 1.8181 11.9998-.4545l.1818-.091.2728-.2727c0-.0909.0909-.0909.1818-.1818.4545-.5454.9091-1.0909 1.2727-1.7272l1.8181-2.8182-2.909 1.6363c-4.2727 2.3636-8.1817 2.8182-12.0907 1.3637z"/><path d="m10.9998 24.9011c2.4545-.6363 5.0908-.5454 7.7272.4546 2.909 1.0909 10.3634 2.6363 18.7269-4.909l1.8182-1.8182-.1819-.4545c-.0909-.3636-.2727-.8182-.4545-1.2727l-.4545-1.2727-.9091.909c-.0909.1819-.2727.2728-.4546.4546-3.9999 4.0908-10.1816 8.2726-17.2724 5.7272-3.1817-1.1818-6.4544-1.3637-9.4544-.5455-2.909.8182-5.45442 2.3636-7.81801 4.5454v-.0909l-1.363614 1.4545c0 .0909-.090891.0909-.181798.1818l-.27274.2727.090913.3637c.090908.4545.272717.909.363625 1.3636l.545454 1.4545.90907-1.1818c.09091-.1818.27272-.2727.36363-.4545 1.90905-1.7273 4.54538-4.1818 8.27257-5.1818z"/><path d="m2.1818 23.2646c2.09088-2.1818 4.45445-3.5454 6.99987-4.2727 2.45453-.6363 5.09083-.5454 7.72713.4546 8.1817 2.9999 15.2725-1.9091 18.3633-4.5454l1.1818-1.1818.4546-.3636-.3637-.5455c-.2727-.2727-.4545-.6363-.7272-1l-.5455-.7272-.6363.6363c-.0909.0909-.2727.2727-.3637.3637-3.8181 3.6363-9.7271 7.3635-16.4542 4.8181-3.1818-1.1818-6.4544-1.3637-9.4544-.5455-1.90906.5455-3.72721 1.4545-5.54536 2.6363l-1.909065 1.5455c-.181815.1818-.272722.2727-.454537.4545l-.181799.1818v.2727c-.090907.6364-.090918 1.2727-.1818259 1.8182l-.0909131 2.2727 1.54544-1.6364c.18181-.1818.36364-.4545.63636-.6363z"/><path d="m26.0908 40.9007c-.2727-.0909-.4545-.1819-.7272-.2728-3.1818-1.1818-6.4545-1.3636-9.4545-.5454-.6363.1818-1.2726.3636-1.909.6364l-2.1818.9999-.5454.2728 1.8181.6363c.5455.1818 1.0909.3637 1.6364.5455l.2727.0909.2727-.0909c.2727-.0909.5455-.2728.8182-.2728.1818 0 .3636-.0909.5454-.1818 2.1818-.5454 4.5454-.5454 7.0908.2727.2727.091.4546.1819.7273.2728l.4545.1818.2727-.0909c.6364-.1818 1.3636-.3636 1.9091-.6364l2.5454-.909-2.6363-.6364c-.2727-.0909-.6364-.1818-.9091-.2727z"/><path d="m40 22.0829-1.3636 1.3636c-.1818.1818-.3636.3636-.5454.5454-3.7272 3.5454-9.7271 7.3635-16.4543 4.8181-3.1818-1.1818-6.4544-1.3636-9.4544-.5454-2.81811.8182-5.36354 2.2727-7.63623 4.4545l-1.18179 1.2727-.36362.4545.36362.5454c.27273.3637.45455.6364.63637 1l.54542.8182.63636-.8182c.09091-.0909.27272-.2727.36363-.3636 2.18178-2.3636 4.54534-3.8181 7.27264-4.5454 2.4545-.6364 5.0908-.5454 7.7271.4545 2.2727.8182 4.6363 1.0909 6.9999.8182 4.1817-.4545 8.3635-2.8181 11.4543-5.4544.1819-.1818.3636-.2727.5455-.4546l.2727-.2727v-.2727c0-.5455.0909-1.1818.0909-1.7273z"/><path d="m5.45373 13.7196c.54545-.2728 1.18182-.4546 1.72726-.6364 2.45451-.6364 5.09081-.5455 7.72711.4545 1.7273.6364 3.4545.9091 5.3636.9091 3.8181 0 7.6362-1.3636 11.1816-3.9999l1.8181-1.45455-.8181-.63636c-.2728-.27273-.6364-.54544-1-.72725l-.5455-.36363-.4545.36363c-.1818.09091-.2727.27272-.4545.36362-4.8181 3.63634-9.6362 4.63634-14.1816 2.90904-3.2727-1.18178-6.54535-1.45451-9.81802-.4545-.27272.0909-.54544.1818-.90907.2727l-.1818.0909-.27274.2727c0 .0909-.09089.0909-.1818.1818-.36363.5455-.81818 1-1.18181 1.5455l-1.72724 2.6363 2.81814-1.4545c.45453 0 .81815-.1818 1.09087-.2727z"/><path d="m12.9089 7.53769.2727.09091c1.1818.45454 3 .90907 5.2726.90907 2.3636 0 4.6363-.54545 6.909-1.45452l2.8181-1.36361-1.909-.63634c-.5454-.18182-1.0909-.36363-1.7273-.45454h-.2727l-.2727.09089c-.2727.0909-.5455.27274-.8182.36365-2.7272.99998-5.4544 1.1818-8.0907.45454-.2728-.09091-.5455-.18183-.8182-.27274l-.2727-.09091-.2728.09091c-.5454.18181-1.0908.36364-1.6363.63636l-2.09087.90908 2.18177.63633c.1818-.0909.4546.00001.7273.09092z"/></g></svg>`
+      },
+      {
+        id: "biosynthesis",
+        name: "Biosynthesis",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g clip-rule="evenodd" fill-rule="evenodd"><path d="m4.29111 28.6025c.90712.9019.9071 2.3641-.00003 3.266l-.04646.0462c-.90713.9019-2.37788.9018-3.284994-.0001-.9071177-.9019-.9071038-2.3641.000031-3.266l.046453-.0462c.90714-.9019 2.37788-.9018 3.285.0001z" fill="#a4bcfd"/><path d="m15.2112 29.298c.9055.9035.9028 2.3658-.006 3.266l-6.43424 6.3741c-.90876.9002-2.3795.8976-3.28499-.0059-.90548-.9035-.90282-2.3658.00594-3.266l6.43429-6.3741c.9088-.9002 2.3795-.8976 3.285.0059z" fill="#6172f3"/><path d="m23.9431 40.2706c.7116-1.0613 2.1538-1.348 3.2212-.6405l.1394.0923c1.0674.7075 1.3558 2.1414.6442 3.2026-.7116 1.0613-2.1538 1.3481-3.2212.6406l-.1394-.0924c-1.0674-.7075-1.3558-2.1414-.6442-3.2026z" fill="#a4bcfd"/><path d="m39.2728 28.4638c.9072.9019.9072 2.3641 0 3.266l-3.159 3.1408c-.9072.9019-2.3779.9019-3.285 0s-.9071-2.3641 0-3.266l3.1591-3.1408c.9071-.9019 2.3778-.9019 3.2849 0z" fill="#6172f3"/><g fill="#444ce7"><path d="m39.3197 16.8473c.9071.9019.9071 2.3642 0 3.266l-23.3446 23.2098c-.9071.9019-2.3779.9019-3.285 0s-.9071-2.3641 0-3.266l23.3446-23.2098c.9071-.9019 2.3778-.9019 3.285 0z"/><path d="m34.905 9.71133c.9072.90187.9072 2.36417 0 3.26607l-13.426 13.3485c-.9071.9019-2.3779.9019-3.285 0s-.9071-2.3642 0-3.2661l13.4261-13.34847c.9071-.90189 2.3778-.90189 3.2849 0z"/><path d="m27.8187 5.18362c.9077.90128.9087 2.36353.0022 3.26603l-17.2588 17.18215c-.90647.9025-2.37721.9035-3.28495.0022-.90773-.9013-.90872-2.3635-.00221-3.266l17.25876-17.18218c.9065-.9025 2.3772-.90348 3.285-.0022z"/></g><path d="m10.7276 10.6841c.9056.9035.9031 2.3657-.0056 3.266l-6.75949 6.6974c-.90869.9003-2.37943.8978-3.28499-.0056-.905563-.9035-.903032-2.3657.005654-3.2661l6.759476-6.6973c.90868-.90034 2.37942-.89783 3.28495.0056z" fill="#6172f3"/><path d="m14.8678 4.00024c1.2828 0 2.3228 1.03397 2.3228 2.30944v.23094c0 1.27546-1.04 2.30943-2.3228 2.30943-1.2829 0-2.3229-1.03397-2.3229-2.30943v-.23094c0-1.27547 1.04-2.30944 2.3229-2.30944z" fill="#a4bcfd"/></g></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g clip-rule="evenodd" fill="#fff" fill-rule="evenodd"><path d="m4.29111 28.6025c.90712.9019.9071 2.3641-.00003 3.266l-.04646.0462c-.90713.9019-2.37788.9018-3.284994-.0001-.9071177-.9019-.9071038-2.3641.000031-3.266l.046453-.0462c.90714-.9019 2.37788-.9018 3.285.0001z" opacity=".5"/><path d="m15.2112 29.298c.9055.9035.9028 2.3658-.006 3.266l-6.43424 6.3741c-.90876.9002-2.3795.8976-3.28499-.0059-.90548-.9035-.90282-2.3658.00594-3.266l6.43429-6.3741c.9088-.9002 2.3795-.8976 3.285.0059z" opacity=".7"/><path d="m23.9431 40.2706c.7116-1.0613 2.1538-1.348 3.2212-.6405l.1394.0923c1.0674.7075 1.3558 2.1414.6442 3.2026-.7116 1.0613-2.1538 1.3481-3.2212.6406l-.1394-.0924c-1.0674-.7075-1.3558-2.1414-.6442-3.2026z" opacity=".5"/><path d="m39.2728 28.4638c.9072.9019.9072 2.3641 0 3.266l-3.159 3.1408c-.9072.9019-2.3779.9019-3.285 0s-.9071-2.3641 0-3.266l3.1591-3.1408c.9071-.9019 2.3778-.9019 3.2849 0z" opacity=".7"/><path d="m39.3197 16.8473c.9071.9019.9071 2.3642 0 3.266l-23.3446 23.2098c-.9071.9019-2.3779.9019-3.285 0s-.9071-2.3641 0-3.266l23.3446-23.2098c.9071-.9019 2.3778-.9019 3.285 0z"/><path d="m34.905 9.71133c.9072.90187.9072 2.36417 0 3.26607l-13.426 13.3485c-.9071.9019-2.3779.9019-3.285 0s-.9071-2.3642 0-3.2661l13.4261-13.34847c.9071-.90189 2.3778-.90189 3.2849 0z"/><path d="m27.8187 5.18362c.9077.90128.9087 2.36353.0022 3.26603l-17.2588 17.18215c-.90647.9025-2.37721.9035-3.28495.0022-.90773-.9013-.90872-2.3635-.00221-3.266l17.25876-17.18218c.9065-.9025 2.3772-.90348 3.285-.0022z"/><path d="m10.7276 10.6841c.9056.9035.9031 2.3657-.0056 3.266l-6.75949 6.6974c-.90869.9003-2.37943.8978-3.28499-.0056-.905563-.9035-.903032-2.3657.005654-3.2661l6.759476-6.6973c.90868-.90034 2.37942-.89783 3.28495.0056z" opacity=".7"/><path d="m14.8678 4.00024c1.2828 0 2.3228 1.03397 2.3228 2.30944v.23094c0 1.27546-1.04 2.30943-2.3228 2.30943-1.2829 0-2.3229-1.03397-2.3229-2.30943v-.23094c0-1.27547 1.04-2.30944 2.3229-2.30944z" opacity=".5"/></g></svg>`
+      },
+      {
+        id: "boltshift",
+        name: "Boltshift",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m20 44c11.0457 0 20-8.9543 20-20s-8.9543-20-20-20c-11.04572 0-20 8.9543-20 20s8.95428 20 20 20zm6.2393-30.6832c.3037-1.0787-.7432-1.7167-1.6993-1.0355l-13.3469 9.5083c-1.0369.7387-.8738 2.2104.245 2.2104h3.5146v-.0272h6.8498l-5.5813 1.9693-2.4605 8.7411c-.3037 1.0788.7431 1.7167 1.6993 1.0355l13.3469-9.5082c1.0369-.7387.8737-2.2105-.245-2.2105h-5.3298z" fill="#155eef" fill-rule="evenodd"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m20 44c11.0457 0 20-8.9543 20-20s-8.9543-20-20-20c-11.04572 0-20 8.9543-20 20s8.95428 20 20 20zm6.2393-30.6832c.3037-1.0787-.7432-1.7167-1.6993-1.0355l-13.3469 9.5083c-1.0369.7387-.8738 2.2104.245 2.2104h3.5146v-.0272h6.8498l-5.5813 1.9693-2.4605 8.7411c-.3037 1.0788.7431 1.7167 1.6993 1.0355l13.3469-9.5082c1.0369-.7387.8737-2.2105-.245-2.2105h-5.3298z" fill="#fff" fill-rule="evenodd"/></svg>`
+      },
+      {
+        id: "buildingblocks",
+        name: "BuildingBlocks",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 37 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m12.8841 4.30945-6.8842 3.97574 6.8891 3.97661 6.8862-3.97575zm8.8919 7.44025-6.887 3.9762-.0007 7.9532 6.8877-3.9771zm2 11.4164-6.8879 3.9772 6.8889 3.9765 6.8871-3.9763zm8.8879 7.4416-6.8868 3.9761v7.9522l6.8868-3.9761zm-10.8868 11.9287v-7.9525l-6.8891-3.9766v7.9525zm-10.8888-18.8569-6.8883-3.9775v-7.9526l6.889 3.9765zm-.0003 4.6187-9.38814-5.4209c-.928127-.5359-1.49986-1.5262-1.49986-2.598v-11.99368c0-.71444.381106-1.37463.999789-1.73193l10.383811-5.996798c.9281-.5359626 2.0716-.5361538 2.9998-.000505l10.3922 5.996973c.619.3572 1.0004 1.01758 1.0004 1.73226v11.41638l9.888 5.7096c.6188.3573.9999 1.0175.9999 1.732v11.9937c0 1.0718-.5718 2.0621-1.5 2.598l-10.3868 5.9969c-.6187.3572-1.381.3572-1.9998.0001l-10.3891-5.9969c-.9283-.5358-1.5002-1.5263-1.5002-2.5982z" fill="#155eef" fill-rule="evenodd"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 37 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m12.8841 4.30945-6.8842 3.97574 6.8891 3.97661 6.8862-3.97575zm8.8919 7.44025-6.887 3.9762-.0007 7.9532 6.8877-3.9771zm2 11.4164-6.8879 3.9772 6.8889 3.9765 6.8871-3.9763zm8.8879 7.4416-6.8868 3.9761v7.9522l6.8868-3.9761zm-10.8868 11.9287v-7.9525l-6.8891-3.9766v7.9525zm-10.8888-18.8569-6.8883-3.9775v-7.9526l6.889 3.9765zm-.0003 4.6187-9.38814-5.4209c-.928127-.5359-1.49986-1.5262-1.49986-2.598v-11.99368c0-.71444.381106-1.37463.999789-1.73193l10.383811-5.996798c.9281-.5359626 2.0716-.5361538 2.9998-.000505l10.3922 5.996973c.619.3572 1.0004 1.01758 1.0004 1.73226v11.41638l9.888 5.7096c.6188.3573.9999 1.0175.9999 1.732v11.9937c0 1.0718-.5718 2.0621-1.5 2.598l-10.3868 5.9969c-.6187.3572-1.381.3572-1.9998.0001l-10.3891-5.9969c-.9283-.5358-1.5002-1.5263-1.5002-2.5982z" fill="#155eef" fill-rule="evenodd"/></svg>`
+      },
+      {
+        id: "calescence",
+        name: "Calescence",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 36 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g clip-rule="evenodd" fill="#1570ef" fill-rule="evenodd"><path d="m35.3721 14v8.0492h-9.9698v-2.2927z"/><path d="m35.3699 14.0001-9.9698 5.7565-7.3513-4.2436v-11.513z" opacity=".9"/><path d="m18.0512 4v11.513l-7.349 4.2436-9.969778-5.7565z" opacity=".8"/><path d="m10.7002 19.7565v8.4868l-9.969731 5.756v-19.9993z" opacity=".7"/><path d="m18.0492 32.4871v11.5129l-17.318731-10.0006 9.969731-5.756z" opacity=".6"/><path d="m35.3699 33.9994-17.3211 10.0006v-11.5129l7.3513-4.2437z" opacity=".5"/><path d="m35.3721 25.9507v8.0487l-9.9698-5.756v-2.2927z" opacity=".4"/></g></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 36 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g clip-rule="evenodd" fill="#fff" fill-rule="evenodd"><path d="m35.3721 14v8.0492h-9.9698v-2.2927z"/><path d="m35.3699 14.0001-9.9698 5.7565-7.3513-4.2436v-11.513z" opacity=".9"/><path d="m18.0512 4v11.513l-7.349 4.2436-9.969778-5.7565z" opacity=".8"/><path d="m10.7002 19.7565v8.4868l-9.969731 5.756v-19.9993z" opacity=".7"/><path d="m18.0492 32.4871v11.5129l-17.318731-10.0006 9.969731-5.756z" opacity=".6"/><path d="m35.3699 33.9994-17.3211 10.0006v-11.5129l7.3513-4.2437z" opacity=".5"/><path d="m35.3721 25.9507v8.0487l-9.9698-5.756v-2.2927z" opacity=".4"/></g></svg>`
+      },
+      {
+        id: "capsule",
+        name: "Capsule",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="18" fill="#1570ef" r="14"/><circle cx="26" cy="30" fill="#53b1fd" r="14"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><circle cx="14" cy="18" opacity=".7" r="14"/><circle cx="26" cy="30" opacity=".7" r="14"/></g></svg>`
+      },
+      {
+        id: "constellation",
+        name: "Constellation",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 44 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m16 8 5.0912 10.9088 10.9088 5.0912-10.9088 5.0912-5.0912 10.9088-5.0912-10.9088-10.9088-5.0912 10.9088-5.0912z"/><path d="m20.0469 31.3286 6.3539-1.0932 3.6 9.7646 3.6-9.7646 10.2565 1.7646-6.6564-8 6.6564-8-10.2565 1.7646-3.6-9.7646-3.6 9.7646-6.3539-1.0932 1.0442 2.2374 10.9088 5.0912-10.9088 5.0912z" opacity=".5"/></g></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 44 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m16 8 5.0912 10.9088 10.9088 5.0912-10.9088 5.0912-5.0912 10.9088-5.0912-10.9088-10.9088-5.0912 10.9088-5.0912z"/><path d="m20.0469 31.3286 6.3539-1.0932 3.6 9.7646 3.6-9.7646 10.2565 1.7646-6.6564-8 6.6564-8-10.2565 1.7646-3.6-9.7646-3.6 9.7646-6.3539-1.0932 1.0442 2.2374 10.9088 5.0912-10.9088 5.0912z" opacity=".5"/></g></svg>`
+      },
+      {
+        id: "codecraft",
+        name: "Codecraft",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m0 9c0-2.76142 2.23858-5 5-5h10c2.7614 0 5 2.23858 5 5v9.8192c.0002.06.0003.1203.0003.1808 0 2.7575 2.2322 4.9936 4.9881 5h.0116 10c2.7614 0 5 2.2386 5 5v10c0 2.7614-2.2386 5-5 5h-10c-2.7614 0-5-2.2386-5-5v-10c0-.0139.0001-.0277.0002-.0416-.0224-2.7422-2.2523-4.9584-4.9999-4.9584-.0129 0-.0258 0-.0387 0h-9.9616c-2.76142 0-5-2.2386-5-5z" fill="#155eef"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m0 9c0-2.76142 2.23858-5 5-5h10c2.7614 0 5 2.23858 5 5v9.8192c.0002.06.0003.1203.0003.1808 0 2.7575 2.2322 4.9936 4.9881 5h.0116 10c2.7614 0 5 2.2386 5 5v10c0 2.7614-2.2386 5-5 5h-10c-2.7614 0-5-2.2386-5-5v-10c0-.0139.0001-.0277.0002-.0416-.0224-2.7422-2.2523-4.9584-4.9999-4.9584-.0129 0-.0258 0-.0387 0h-9.9616c-2.76142 0-5-2.2386-5-5z" fill="#155eef"/></svg>`
+      },
+      {
+        id: "command-r",
+        name: "Command+R",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 32 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m18.6667 30.6667c7.3638 0 13.3333-5.9696 13.3333-13.3334 0-7.36376-5.9695-13.3333-13.3333-13.3333h-18.6667v26.6667z" fill="#155eef"/><path d="m0 4 32 40h-21.3333l-10.6667-13.3333z" fill="#2e90fa"/><path d="m21.1488 30.436c-.8042.1515-1.6339.2307-2.4821.2307h-18.6667v-26.6667z" fill="#53b1fd"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 32 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m18.6667 30.6667c7.3638 0 13.3333-5.9696 13.3333-13.3334 0-7.36376-5.9695-13.3333-13.3333-13.3333h-18.6667v26.6667z" opacity=".7"/><path d="m0 4 32 40h-21.3333l-10.6667-13.3333z" opacity=".7"/><path d="m21.1488 30.436c-.8042.1515-1.6339.2307-2.4821.2307h-18.6667v-26.6667z" opacity=".7"/></g></svg>`
+      },
+      {
+        id: "contrast-ai",
+        name: "ContrastAI",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m20 4c11.0457 0 20 8.9543 20 20s-8.9543 20-20 20-20-8.9543-20-20 8.9543-20 20-20zm15 20c0 8.2843-6.7157 15-15 15v-30c8.2843 0 15 6.7157 15 15z" fill="#155eef" fill-rule="evenodd"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m20 4c11.0457 0 20 8.9543 20 20s-8.9543 20-20 20-20-8.9543-20-20 8.9543-20 20-20zm15 20c0 8.2843-6.7157 15-15 15v-30c8.2843 0 15 6.7157 15 15z" fill="#fff" fill-rule="evenodd"/></svg>`
+      },
+      {
+        id: "convergence",
+        name: "Convergence",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 42 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m22.1017 20.8596 9.8995-9.8994-2.1213-2.12137-7.3389 7.33887v-13.1777h-3v13.1777l-7.3388-7.33887-2.1213 2.12137 9.8995 9.8994 1.0606 1.0607zm2.1207 2.1214 9.8995-9.8995 2.1213 2.1213-7.3388 7.3388h13.0956v3h-13.0956l7.3388 7.3389-2.1213 2.1213-9.8995-9.8995-1.0607-1.0607zm-16.26224 12.0208 9.89944-9.8995 1.0607-1.0607-1.0607-1.0606-9.89944-9.8995-2.12133 2.1213 7.33887 7.3388h-13.17574688v3h13.17574688l-7.33887 7.3389zm12.02024-7.7782-9.8995 9.8995 2.1213 2.1213 7.3388-7.3388v13.0944h3v-13.0944l7.3389 7.3388 2.1213-2.1213-9.8995-9.8995-1.0607-1.0607z" fill="#155eef" fill-rule="evenodd"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 42 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m22.1017 20.8596 9.8995-9.8994-2.1213-2.12137-7.3389 7.33887v-13.1777h-3v13.1777l-7.3388-7.33887-2.1213 2.12137 9.8995 9.8994 1.0606 1.0607zm2.1207 2.1214 9.8995-9.8995 2.1213 2.1213-7.3388 7.3388h13.0956v3h-13.0956l7.3388 7.3389-2.1213 2.1213-9.8995-9.8995-1.0607-1.0607zm-16.26224 12.0208 9.89944-9.8995 1.0607-1.0607-1.0607-1.0606-9.89944-9.8995-2.12133 2.1213 7.33887 7.3388h-13.17574688v3h13.17574688l-7.33887 7.3389zm12.02024-7.7782-9.8995 9.8995 2.1213 2.1213 7.3388-7.3388v13.0944h3v-13.0944l7.3389 7.3388 2.1213-2.1213-9.8995-9.8995-1.0607-1.0607z" fill="#155eef" fill-rule="evenodd"/></svg>`
+      },
+      {
+        id: "core-os",
+        name: "CoreOS",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 42 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m15.2286 4.99951c-3.2154 0-6.18655 1.71539-7.79425 4.5l-5.7735 9.99999c-1.6076941 2.7846-1.607697 6.2154 0 9l5.7735 10c1.6077 2.7846 4.57885 4.5 7.79425 4.5h11.547c3.2154 0 6.1865-1.7154 7.7942-4.5l5.7735-10c1.6077-2.7846 1.6077-6.2154 0-9l-5.7735-9.99999c-1.6077-2.78461-4.5788-4.5-7.7942-4.5zm11.547 5.99999h-7.2169c-1.1547 0-1.8762 1.2499-1.298 2.2494 1.784 3.0838 3.5722 6.1653 5.3536 9.2506.5359.9282.5359 2.0718 0 3-1.7814 3.0854-3.5696 6.1668-5.3536 9.2506-.5782.9995.1433 2.2494 1.298 2.2494h7.2169c1.0718 0 2.0622-.5718 2.5981-1.5l5.7735-10c.5359-.9282.5359-2.0718 0-3l-5.7735-10c-.5359-.9282-1.5263-1.5-2.5981-1.5z" fill="#155eef" fill-rule="evenodd"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 42 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m15.2286 4.99951c-3.2154 0-6.18655 1.71539-7.79425 4.5l-5.7735 9.99999c-1.6076941 2.7846-1.607697 6.2154 0 9l5.7735 10c1.6077 2.7846 4.57885 4.5 7.79425 4.5h11.547c3.2154 0 6.1865-1.7154 7.7942-4.5l5.7735-10c1.6077-2.7846 1.6077-6.2154 0-9l-5.7735-9.99999c-1.6077-2.78461-4.5788-4.5-7.7942-4.5zm11.547 5.99999h-7.2169c-1.1547 0-1.8762 1.2499-1.298 2.2494 1.784 3.0838 3.5722 6.1653 5.3536 9.2506.5359.9282.5359 2.0718 0 3-1.7814 3.0854-3.5696 6.1668-5.3536 9.2506-.5782.9995.1433 2.2494 1.298 2.2494h7.2169c1.0718 0 2.0622-.5718 2.5981-1.5l5.7735-10c.5359-.9282.5359-2.0718 0-3l-5.7735-10c-.5359-.9282-1.5263-1.5-2.5981-1.5z" fill="#155eef" fill-rule="evenodd"/></svg>`
+      },
+      {
+        id: "cubekit",
+        name: "Cubekit",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m0 14.5264v18.9473l17.8947-12.2437v-18.94741z" fill="#155eef" opacity=".5"/><path d="m0 33.4737v-18.9474l17.8947 12.2438v18.9474z" fill="#1570ef" opacity=".5"/><path d="m40 14.5263v18.9474l-17.8947-12.2438v-18.94737z" fill="#155eef" opacity=".5"/><path d="m40 33.4737v-18.9474l-17.8947 12.2438v18.9474z" fill="#1570ef" opacity=".5"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m0 14.5264v18.9473l17.8947-12.2437v-18.94741z" opacity=".5"/><path d="m0 33.4737v-18.9474l17.8947 12.2438v18.9474z" opacity=".5"/><path d="m40 14.5263v18.9474l-17.8947-12.2438v-18.94737z" opacity=".5"/><path d="m40 33.4737v-18.9474l-17.8947 12.2438v18.9474z" opacity=".5"/></g></svg>`
+      },
+      {
+        id: "europa",
+        name: "Europa",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m28.6446 39.168c-.6032 1.3404-1.353 2.6531-2.2519 3.7888 7.4581-2.5137 12.9483-9.3054 13.5527-17.4568h-2.6549c-3.2399 0-5.8424 2.5861-6.369 5.7829-.4855 2.9468-1.2621 5.6301-2.2769 7.8851z"/><path d="m22.7724 25.5c3.3921 0 6.167 2.8299 5.5439 6.1643-1.3533 7.2424-4.5667 12.3357-8.3155 12.3357-4.7435 0-8.6299-8.1549-8.975-18.5z"/><path d="m30.9904 17.1502c.4961 3.2267 3.1106 5.8498 6.3752 5.8498h2.6107c-.4123-8.3729-5.9735-15.39183-13.5836-17.95683.8989 1.13575 1.6487 2.44843 2.2519 3.78878 1.0643 2.36505 1.8666 5.20115 2.3458 8.31825z"/><path d="m28.4165 16.8957c.5674 3.3176-2.1954 6.1043-5.5612 6.1043h-11.8434c.2344-10.5811 4.1693-19 8.9889-19 3.8447 0 7.1263 5.35721 8.4157 12.8957z"/><path d="m8.51131 23c.11359-5.4083 1.14536-10.3894 2.84579-14.16805.6031-1.34035 1.3529-2.65303 2.2519-3.78878-7.61011 2.565-13.171316 9.58393-13.5836094 17.95683z"/><path d="m.0562286 25.5c.6043994 8.1514 6.0946514 14.9431 13.5527714 17.4568-.899-1.1357-1.6488-2.4484-2.2519-3.7888-1.6479-3.6619-2.66781-8.4531-2.83264-13.668z"/></g></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m28.6446 39.168c-.6032 1.3404-1.353 2.6531-2.2519 3.7888 7.4581-2.5137 12.9483-9.3054 13.5527-17.4568h-2.6549c-3.2399 0-5.8424 2.5861-6.369 5.7829-.4855 2.9468-1.2621 5.6301-2.2769 7.8851z"/><path d="m22.7724 25.5c3.3921 0 6.167 2.8299 5.5439 6.1643-1.3533 7.2424-4.5667 12.3357-8.3155 12.3357-4.7435 0-8.6299-8.1549-8.975-18.5z"/><path d="m30.9904 17.1502c.4961 3.2267 3.1106 5.8498 6.3752 5.8498h2.6107c-.4123-8.3729-5.9735-15.39183-13.5836-17.95683.8989 1.13575 1.6487 2.44843 2.2519 3.78878 1.0643 2.36505 1.8666 5.20115 2.3458 8.31825z"/><path d="m28.4165 16.8957c.5674 3.3176-2.1954 6.1043-5.5612 6.1043h-11.8434c.2344-10.5811 4.1693-19 8.9889-19 3.8447 0 7.1263 5.35721 8.4157 12.8957z"/><path d="m8.51131 23c.11359-5.4083 1.14536-10.3894 2.84579-14.16805.6031-1.34035 1.3529-2.65303 2.2519-3.78878-7.61011 2.565-13.171316 9.58393-13.5836094 17.95683z"/><path d="m.0562286 25.5c.6043994 8.1514 6.0946514 14.9431 13.5527714 17.4568-.899-1.1357-1.6488-2.4484-2.2519-3.7888-1.6479-3.6619-2.66781-8.4531-2.83264-13.668z"/></g></svg>`
+      },
+      {
+        id: "feather-dev",
+        name: "FeatherDev",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 44 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m36.3068 11.4224c-.4322-.4323-.8644-.8645-1.2967-1.2967-1.2966-1.38311-2.6797-2.76621-4.4086-3.63065-1.9882-1.03733-4.1493-.778-6.3104-.778-3.2849 0-11.4971 0-16.33798 0l3.28488 4.40865h19.6228c1.8153 0 3.3713.3458 4.8409 1.2967.2593.0864.5186.0864.6051 0z" fill="#53b1fd"/><path d="m39.9368 18.511c-.4322-.4322-.8645-.8645-1.2967-1.2967-1.2967-1.3831-2.6797-2.7662-4.4086-3.6306-1.9882-1.0374-4.1494-.778-6.3105-.778-2.8526 0-9.6817 0-14.5226 0l3.2849 4.4086h17.8939c1.8154 0 3.3714.3458 4.8409 1.2967.1729.0864.3458.0864.5187 0z" fill="#2e90fa"/><path d="m44 25.4263c-.4322-.4323-.8645-.8645-1.2967-1.2967-1.2966-1.3831-2.6797-2.7662-4.4086-3.6307-1.9882-1.0373-4.1493-.7779-6.3104-.7779-2.6798 0-8.558 0-13.3124 0l3.2848 4.4086h16.5973c1.8153 0 3.3713.3458 4.8409 1.2967.2593.0864.4322.1729.6051 0z" fill="#1570ef"/><path d="m7.60742 37.0961c.43222.4322.86444.8644 1.29666 1.2966 1.29662 1.3831 2.67972 2.7662 4.40862 3.6307 1.9882 1.0373 4.1493.778 6.3104.778h16.338l-3.2849-4.4087c-5.9646 0-15.3006 0-19.6228 0-1.8153 0-3.37132-.3457-4.84087-1.2966-.25933-.0865-.43222-.0865-.60511 0z" fill="#53b1fd"/><path d="m3.97656 30.0079c.43222.4323.86444.8645 1.29666 1.2967 1.29667 1.3831 2.67976 2.7662 4.40864 3.6307 1.98824 1.0373 4.14934.778 6.31044.778h14.5226l-3.2849-4.4087c-5.8782 0-13.9175 0-17.89391 0-1.81532 0-3.37132-.3458-4.84087-1.2967-.17289-.0864-.34577-.0864-.51866 0z" fill="#2e90fa"/><path d="m0 23.0058c.43222.4322.864441.8644 1.29666 1.2966 1.29666 1.3831 2.67977 2.7662 4.40866 3.6307 1.98821 1.0373 4.1493.778 6.31038.778h13.3124l-3.2849-4.4087c-5.7053 0-12.96657 0-16.59722 0-1.81533 0-3.37132-.3458-4.840874-1.2966-.259332-.0865-.432218-.0865-.605106 0z" fill="#1570ef"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 44 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m36.3068 11.4224c-.4322-.4323-.8644-.8645-1.2967-1.2967-1.2966-1.38311-2.6797-2.76621-4.4086-3.63065-1.9882-1.03733-4.1493-.778-6.3104-.778-3.2849 0-11.4971 0-16.33798 0l3.28488 4.40865h19.6228c1.8153 0 3.3713.3458 4.8409 1.2967.2593.0864.5186.0864.6051 0z" opacity=".5"/><path d="m39.9368 18.511c-.4322-.4322-.8645-.8645-1.2967-1.2967-1.2967-1.3831-2.6797-2.7662-4.4086-3.6306-1.9882-1.0374-4.1494-.778-6.3105-.778-2.8526 0-9.6817 0-14.5226 0l3.2849 4.4086h17.8939c1.8154 0 3.3714.3458 4.8409 1.2967.1729.0864.3458.0864.5187 0z" opacity=".7"/><path d="m44 25.4263c-.4322-.4323-.8645-.8645-1.2967-1.2967-1.2966-1.3831-2.6797-2.7662-4.4086-3.6307-1.9882-1.0373-4.1493-.7779-6.3104-.7779-2.6798 0-8.558 0-13.3124 0l3.2848 4.4086h16.5973c1.8153 0 3.3713.3458 4.8409 1.2967.2593.0864.4322.1729.6051 0z"/><path d="m7.60742 37.0961c.43222.4322.86444.8644 1.29666 1.2966 1.29662 1.3832 2.67972 2.7662 4.40862 3.6307 1.9882 1.0373 4.1493.778 6.3104.778h16.338l-3.2849-4.4087c-5.9646 0-15.3006 0-19.6228 0-1.8153 0-3.37132-.3457-4.84087-1.2966-.25933-.0865-.43222-.0865-.60511 0z" opacity=".5"/><path d="m3.97656 30.0079c.43222.4323.86444.8645 1.29666 1.2967 1.29667 1.3831 2.67976 2.7662 4.40864 3.6307 1.98824 1.0373 4.14934.778 6.31044.778h14.5226l-3.2849-4.4087c-5.8782 0-13.9175 0-17.89391 0-1.81532 0-3.37132-.3458-4.84087-1.2967-.17289-.0864-.34577-.0864-.51866 0z" opacity=".7"/><path d="m0 23.0058c.43222.4322.864441.8644 1.29666 1.2966 1.29666 1.3831 2.67977 2.7662 4.40866 3.6307 1.98821 1.0373 4.1493.778 6.31038.778h13.3124l-3.2849-4.4087c-5.7053 0-12.96657 0-16.59722 0-1.81533 0-3.37132-.3458-4.840874-1.2966-.259332-.0865-.432218-.0865-.605106 0z"/></g></svg>`
+      },
+      {
+        id: "flora-fauna",
+        name: "Flora&Fauna",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m13.7146 4c-2.2564 0-4.4203.89634-6.01579 2.49183l-7.69881 7.69877v3.524c0 2.4897 1.06944 4.7296 2.77401 6.2854-1.70457 1.5558-2.77401 3.7957-2.77401 6.2854v3.524l7.69881 7.6988c1.59549 1.5955 3.75939 2.4918 6.01579 2.4918 2.4897 0 4.7296-1.0694 6.2854-2.774 1.5558 1.7046 3.7957 2.774 6.2854 2.774 2.2564 0 4.4203-.8963 6.0158-2.4918l7.6988-7.6988v-3.524c0-2.4897-1.0694-4.7296-2.774-6.2854 1.7046-1.5558 2.774-3.7957 2.774-6.2854v-3.524l-7.6988-7.69877c-1.5955-1.59549-3.7594-2.49183-6.0158-2.49183-2.4897 0-4.7296 1.06944-6.2854 2.77401-1.5558-1.70457-3.7957-2.77401-6.2854-2.77401zm12.0442 20c-.0959-.0875-.19-.1774-.2822-.2696l-5.4766-5.4766-5.4766 5.4766c-.0922.0922-.1863.1821-.2822.2696.0959.0875.19.1774.2822.2696l5.4766 5.4766 5.4766-5.4766c.0922-.0922.1863-.1821.2822-.2696zm-3.5366 9.8094v1.683c0 2.244 1.8192 4.0632 4.0632 4.0632 1.0776 0 2.1111-.4281 2.8731-1.1901l6.3971-6.3971v-1.683c0-2.244-1.8192-4.0632-4.0632-4.0632-1.0776 0-2.1111.4281-2.8731 1.1901zm-4.4444 0-6.3971-6.3971c-.762-.762-1.79546-1.1901-2.87308-1.1901-2.24403 0-4.06318 1.8192-4.06318 4.0632v1.683l6.39706 6.3971c.762.762 1.7955 1.1901 2.8731 1.1901 2.244 0 4.0632-1.8192 4.0632-4.0632zm0-21.3018v1.683l-6.3971 6.3971c-.762.762-1.79546 1.1901-2.87308 1.1901-2.24403 0-4.06318-1.8192-4.06318-4.0632v-1.683l6.39706-6.39708c.762-.76199 1.7955-1.19007 2.8731-1.19007 2.244 0 4.0632 1.81915 4.0632 4.06315zm10.8415 8.0801-6.3971-6.3971v-1.683c0-2.244 1.8192-4.06315 4.0632-4.06315 1.0776 0 2.1111.42808 2.8731 1.19007l6.3971 6.39708v1.683c0 2.244-1.8192 4.0632-4.0632 4.0632-1.0776 0-2.1111-.4281-2.8731-1.1901z" fill="#155eef" fill-rule="evenodd"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m13.7146 4c-2.2564 0-4.4203.89634-6.01579 2.49183l-7.69881 7.69877v3.524c0 2.4897 1.06944 4.7296 2.77401 6.2854-1.70457 1.5558-2.77401 3.7957-2.77401 6.2854v3.524l7.69881 7.6988c1.59549 1.5955 3.75939 2.4918 6.01579 2.4918 2.4897 0 4.7296-1.0694 6.2854-2.774 1.5558 1.7046 3.7957 2.774 6.2854 2.774 2.2564 0 4.4203-.8963 6.0158-2.4918l7.6988-7.6988v-3.524c0-2.4897-1.0694-4.7296-2.774-6.2854 1.7046-1.5558 2.774-3.7957 2.774-6.2854v-3.524l-7.6988-7.69877c-1.5955-1.59549-3.7594-2.49183-6.0158-2.49183-2.4897 0-4.7296 1.06944-6.2854 2.77401-1.5558-1.70457-3.7957-2.77401-6.2854-2.77401zm12.0442 20c-.0959-.0875-.19-.1774-.2822-.2696l-5.4766-5.4766-5.4766 5.4766c-.0922.0922-.1863.1821-.2822.2696.0959.0875.19.1774.2822.2696l5.4766 5.4766 5.4766-5.4766c.0922-.0922.1863-.1821.2822-.2696zm-3.5366 9.8094v1.683c0 2.244 1.8192 4.0632 4.0632 4.0632 1.0776 0 2.1111-.4281 2.8731-1.1901l6.3971-6.3971v-1.683c0-2.244-1.8192-4.0632-4.0632-4.0632-1.0776 0-2.1111.4281-2.8731 1.1901zm-4.4444 0-6.3971-6.3971c-.762-.762-1.79546-1.1901-2.87308-1.1901-2.24403 0-4.06318 1.8192-4.06318 4.0632v1.683l6.39706 6.3971c.762.762 1.7955 1.1901 2.8731 1.1901 2.244 0 4.0632-1.8192 4.0632-4.0632zm0-21.3018v1.683l-6.3971 6.3971c-.762.762-1.79546 1.1901-2.87308 1.1901-2.24403 0-4.06318-1.8192-4.06318-4.0632v-1.683l6.39706-6.39708c.762-.76199 1.7955-1.19007 2.8731-1.19007 2.244 0 4.0632 1.81915 4.0632 4.06315zm10.8415 8.0801-6.3971-6.3971v-1.683c0-2.244 1.8192-4.06315 4.0632-4.06315 1.0776 0 2.1111.42808 2.8731 1.19007l6.3971 6.39708v1.683c0 2.244-1.8192 4.0632-4.0632 4.0632-1.0776 0-2.1111-.4281-2.8731-1.1901z" fill="#fff" fill-rule="evenodd"/></svg>`
+      },
+      {
+        id: "focal-point",
+        name: "FocalPoint",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m10.7788 6.1817 4.6901 17.5036v-19.24382c.3719-.08679.7478-.16322 1.1273-.22897v19.47459l5.2752-19.6871c.3801.03442.7572.07945 1.1309.13479l-5.3176 19.84571 10.5701-18.30794c.3443.15492.6835.31927 1.0172.49274l-10.6095 18.3763 15.1464-15.1465c.2731.25824.5389.52407.7971.7972l-15.1486 15.1487 18.3784-10.6108c.1734.3337.3377.6729.4926 1.0173l-18.3034 10.5675 19.8403-5.3162c.0553.3737.1003.7508.1347 1.1309l-19.6869 5.2751h19.4741c-.0658.3796-.1422.7554-.229 1.1273h-19.2481l17.507 4.691c-.1798.3443-.3693.6827-.5681 1.0149l-17.2257-4.6156 14.3874 8.3066c-.2723.2801-.5528.5522-.8411.8161l-14.1087-8.1457 10.6759 10.6758c-.3377.1973-.6817.385-1.0316.5628l-10.4426-10.4426 6.8421 11.8508c-.3746.1059-.7537.2012-1.1368.2855l-6.6825-11.5744 3.2219 12.0243c-.2872.0122-.5759.0184-.8661.0184-.0991 0-.198-.0007-.2967-.0022l-3.1483-11.7497v11.4569c-.3795-.0657-.7554-.1421-1.1273-.2289v-11.2261l-2.7759 10.36c-.3541-.1396-.7033-.289-1.0471-.4478l2.7337-10.2024-5.13175 8.8884c-.3177-.2034-.62928-.4156-.9344-.6361l5.09135-8.8186-7.1301 7.1302c-.2731-.2583-.53893-.5241-.79717-.7971l7.12787-7.1279-8.81599 5.0899c-.22059-.3051-.4328-.6167-.6363-.9344l8.89259-5.1341-10.20737 2.735c-.15888-.3438-.3083-.693-.44793-1.047l10.3599-2.776h-11.226124c-.086806-.3719-.163256-.7477-.22903-1.1273h11.452154l-11.74511583-3.1471c-.00145443-.0995-.00218417-.1991-.00218417-.2989 0-.2894.00613487-.5774.0182816-.8639l12.0258184 3.2224-11.57621-6.6836c.084291-.3832.179549-.7623.285427-1.1369l11.855683 6.8449-10.44698-10.447c.17774-.3499.36544-.6939.56273-1.0315l10.68025 10.6802-8.14896-14.1144c.26387-.2882.53605-.56863.81617-.84096l8.30809 14.38996-4.61634-17.22828c.33214-.1988.67064-.38826 1.01484-.56802z" fill="#155eef"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m10.7788 6.1817 4.6901 17.5036v-19.24382c.3719-.08679.7478-.16322 1.1273-.22897v19.47459l5.2752-19.6871c.3801.03442.7572.07945 1.1309.13479l-5.3176 19.84571 10.5701-18.30794c.3443.15492.6835.31927 1.0172.49274l-10.6095 18.3763 15.1464-15.1465c.2731.25824.5389.52407.7971.7972l-15.1486 15.1487 18.3784-10.6108c.1734.3337.3377.6729.4926 1.0173l-18.3034 10.5675 19.8403-5.3162c.0553.3737.1003.7508.1347 1.1309l-19.6869 5.2751h19.4741c-.0658.3796-.1422.7554-.229 1.1273h-19.2481l17.507 4.691c-.1798.3443-.3693.6827-.5681 1.0149l-17.2257-4.6156 14.3874 8.3066c-.2723.2801-.5528.5522-.8411.8161l-14.1087-8.1457 10.6759 10.6758c-.3377.1973-.6817.385-1.0316.5628l-10.4426-10.4426 6.8421 11.8508c-.3746.1059-.7537.2012-1.1368.2855l-6.6825-11.5744 3.2219 12.0243c-.2872.0122-.5759.0184-.8661.0184-.0991 0-.198-.0007-.2967-.0022l-3.1483-11.7497v11.4569c-.3795-.0657-.7554-.1421-1.1273-.2289v-11.2261l-2.7759 10.36c-.3541-.1396-.7033-.289-1.0471-.4478l2.7337-10.2024-5.13174 8.8884c-.31771-.2034-.62929-.4156-.93441-.6361l5.09135-8.8186-7.1301 7.1302c-.2731-.2583-.53893-.5241-.79717-.7971l7.12787-7.1279-8.81599 5.0899c-.22059-.3051-.4328-.6167-.6363-.9344l8.89259-5.1341-10.20737 2.735c-.15888-.3438-.3083-.693-.44793-1.047l10.3599-2.776h-11.226124c-.086806-.3719-.163256-.7477-.22903-1.1273h11.452154l-11.74511583-3.1471c-.00145443-.0995-.00218417-.1991-.00218417-.2989 0-.2894.00613486-.5774.0182816-.8639l12.0258184 3.2224-11.57621-6.6836c.084291-.3832.179549-.7623.285427-1.1369l11.855683 6.8449-10.44698-10.447c.17774-.3499.36544-.6939.56273-1.0315l10.68025 10.6802-8.14896-14.1144c.26387-.2882.53605-.56863.81617-.84096l8.30809 14.38996-4.61634-17.22828c.33214-.1988.67064-.38826 1.01484-.56802z" fill="#fff"/></svg>`
+      },
+      {
+        id: "foresight",
+        name: "Foresight",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 31 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#444ce7"><path d="m-.00195312 17.8433 30.90545312-17.8433-.8189 12.6994-26.32058 15.1961z"/><path d="m3.76367 27.8951 21.73573-12.5492-.8189 12.6994-17.15086 9.902z" opacity=".5"/><path d="m7.52734 37.9477 12.56596-7.255-.8189 12.6994-7.9811 4.6079z" opacity=".25"/></g></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 31 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m-.00195312 17.8433 30.90545312-17.8433-.8189 12.6994-26.32058 15.1961z"/><path d="m3.76367 27.8951 21.73573-12.5492-.8189 12.6994-17.15086 9.902z" opacity=".5"/><path d="m7.52734 37.9477 12.56596-7.255-.8189 12.6994-7.9811 4.6079z" opacity=".25"/></g></svg>`
+      },
+      {
+        id: "galileo",
+        name: "Galileo",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m29.5411 6.41772c2.6913 5.27688 4.209 11.25228 4.209 17.58218s-1.5177 12.3054-4.2091 17.5823c6.2304-3.3881 10.4593-9.9914 10.4593-17.5823s-4.2289-14.19404-10.4592-17.58218z" fill="#6172f3"/><path d="m20.5481 5.99826c-.9047-1.28153-2.4457-1.9717-3.9913-1.70349-9.40496 1.63214-16.5568 9.83343-16.5568 19.70503 0 9.8717 7.1518 18.0729 16.5567 19.7051 1.5456.2682 3.0867-.4219 3.9913-1.7035 3.5923-5.0889 5.7025-11.2988 5.7025-18.0016 0-6.7027-2.1101-12.9126-5.7024-18.00154z" fill="#444ce7"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m29.5411 6.41772c2.6913 5.27688 4.209 11.25228 4.209 17.58218s-1.5177 12.3054-4.2091 17.5823c6.2304-3.3881 10.4593-9.9914 10.4593-17.5823s-4.2289-14.19404-10.4592-17.58218z" opacity=".7"/><path d="m20.5481 5.99826c-.9047-1.28153-2.4457-1.9717-3.9913-1.70349-9.40496 1.63214-16.5568 9.83343-16.5568 19.70503 0 9.8717 7.1518 18.0729 16.5567 19.7051 1.5456.2682 3.0867-.4219 3.9913-1.7035 3.5923-5.0889 5.7025-11.2988 5.7025-18.0016 0-6.7027-2.1101-12.9126-5.7024-18.00154z"/></g></svg>`
+      },
+      {
+        id: "global-bank",
+        name: "GlobalBank",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m27.6627 4h-15.3253l-12.3374 12.3373v15.3253l12.3374 12.3374h15.3253l12.3373-12.3374v-15.3253zm-13.2049 27.8554-7.90357-7.9036 7.90357-7.9036c2.988-2.988 7.9037-2.988 10.8916 0l7.9036 7.9036-7.9036 7.9036c-2.9879 2.988-7.8072 2.988-10.8916 0z" fill="#444ce7"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m27.6627 4h-15.3253l-12.3374 12.3373v15.3253l12.3374 12.3374h15.3253l12.3373-12.3374v-15.3253zm-13.2049 27.8554-7.90357-7.9036 7.90357-7.9036c2.988-2.988 7.9037-2.988 10.8916 0l7.9036 7.9036-7.9036 7.9036c-2.9879 2.988-7.8072 2.988-10.8916 0z" fill="#fff"/></svg>`
+      },
+      {
+        id: "hexsmith",
+        name: "Hexsmith",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m9.72461 41.7983h18.49589c1.2717 0 2.4469-.6785 3.0827-1.7798l4.1102-7.1191h-20.5481z" opacity=".7"/><path d="m25.1445 15.1015h-20.55661l4.11021-7.11909c.63585-1.10133 1.811-1.77977 3.0827-1.77977h18.4959z" opacity=".4"/><path d="m39.5272 25.7801c.6358-1.1014.6358-2.4582 0-3.5596l-4.1102-7.1191-5.1378 8.8989h-20.55068l5.13718 8.8989h20.5481l.0016-.0027.0016.0027z" opacity=".4"/><path d="m14.8634 32.8992-5.13775-8.8988-5.13776 8.8988 5.13776 8.8989z"/><path d="m25.1445 15.1014h-20.55593l-4.108166 7.1192c-.635516 1.1013-.635318 2.458.000521 3.5591l4.111125 7.1195 5.13775-8.8989h20.55l.0013-.0021z" opacity=".7"/><path d="m35.4181 15.1015-5.1378-8.89886-5.1377 8.89886 5.1377 8.8989z"/></g></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m9.72461 41.7983h18.49589c1.2717 0 2.4469-.6785 3.0827-1.7798l4.1102-7.1191h-20.5481z" opacity=".7"/><path d="m25.1445 15.1015h-20.55661l4.11021-7.11909c.63585-1.10133 1.811-1.77977 3.0827-1.77977h18.4959z" opacity=".4"/><path d="m39.5272 25.7801c.6358-1.1013.6358-2.4582 0-3.5596l-4.1102-7.1191-5.1378 8.8989h-20.55068l5.13718 8.8989h20.5481l.0016-.0027.0016.0027z" opacity=".4"/><path d="m14.8634 32.8992-5.13775-8.8988-5.13776 8.8988 5.13776 8.8989z"/><path d="m25.1445 15.1014h-20.55593l-4.108166 7.1192c-.635516 1.1013-.635318 2.458.000521 3.5591l4.111125 7.1195 5.13775-8.8989h20.55l.0013-.0022z" opacity=".7"/><path d="m35.4181 15.1015-5.1378-8.89886-5.1377 8.89886 5.1377 8.8989z"/></g></svg>`
+      },
+      {
+        id: "hourglass",
+        name: "Hourglass",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 30 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m0 41.2222c0 1.5341 1.24365 2.7778 2.77778 2.7778h24.44442c1.5341 0 2.7778-1.2437 2.7778-2.7778v-7.2222c0-8.2843-6.7157-15-15-15-8.28427 0-15 6.7157-15 15z" fill="#1570ef"/><path d="m0 6.77778c0-1.53413 1.24365-2.77778 2.77778-2.77778h24.44442c1.5341 0 2.7778 1.24365 2.7778 2.77778v7.22222c0 8.2843-6.7157 15-15 15-8.28427 0-15-6.7157-15-15z" fill="#53b1fd" opacity=".5"/></svg>`,
+        darkSvg: `<svg width="100%" height="100%" viewBox="0 0 30 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path opacity="0.7" d="M0 41.2222C0 42.7563 1.24365 44 2.77778 44H27.2222C28.7563 44 30 42.7563 30 41.2222V34C30 25.7157 23.2843 19 15 19C6.71573 19 0 25.7157 0 34V41.2222Z" fill="white"/><path opacity="0.7" d="M0 6.77778C0 5.24365 1.24365 4 2.77778 4H27.2222C28.7563 4 30 5.24365 30 6.77778V14C30 22.2843 23.2843 29 15 29C6.71573 29 0 22.2843 0 14V6.77778Z" fill="white"/></svg>`
+      },
+      {
+        id: "kintsugi",
+        name: "Kintsugi",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m20 4 4.2861 9.6525 9.856-3.79464-3.7946 9.85604 9.6525 4.2861-9.6525 4.2861 3.7946 9.856-9.856-3.7946-4.2861 9.6525-4.2861-9.6525-9.85604 3.7946 3.79469-9.856-9.65255-4.2861 9.65255-4.2861-3.79469-9.85604 9.85604 3.79464z" fill="#155eef"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m20 4 4.2861 9.6525 9.856-3.79464-3.7946 9.85604 9.6525 4.2861-9.6525 4.2861 3.7946 9.856-9.856-3.7946-4.2861 9.6525-4.2861-9.6525-9.85604 3.7946 3.79469-9.856-9.65255-4.2861 9.65255-4.2861-3.79469-9.85604 9.85604 3.79464z" fill="#155eef"/></svg>`
+      },
+      {
+        id: "layers",
+        name: "Layers",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m5.03741 15.4637c.7506-2.8008 3.62961-5.67985 6.43049-6.43044l17.4617-4.67957c2.8009-.7506 4.4629.91146 3.7123 3.71231l-4.6795 17.4617c-.7506 2.8009-3.6297 5.6799-6.4305 6.4305l-17.46175 4.6796c-2.80085.7505-4.462904-.9115-3.712306-3.7124z" opacity=".7"/><path d="m12.0355 22.4642c.7506-2.8008 3.6296-5.6799 6.4304-6.4305l17.4617-4.6795c2.8009-.7506 4.4629.9114 3.7123 3.7123l-4.6795 17.4617c-.7506 2.8009-3.6296 5.6799-6.4305 6.4305l-17.4617 4.6795c-2.80085.7506-4.46291-.9114-3.71231-3.7123z" opacity=".7"/></g></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m5.03741 15.4637c.7506-2.8008 3.62961-5.67985 6.43049-6.43044l17.4617-4.67957c2.8009-.7506 4.4629.91146 3.7123 3.71231l-4.6795 17.4617c-.7506 2.8009-3.6297 5.6799-6.4305 6.4305l-17.46175 4.6795c-2.80085.7506-4.462904-.9114-3.712306-3.7123z" opacity=".7"/><path d="m12.0355 22.4642c.7506-2.8008 3.6296-5.6799 6.4304-6.4305l17.4617-4.6795c2.8009-.7506 4.4629.9114 3.7123 3.7123l-4.6795 17.4617c-.7506 2.8009-3.6296 5.6799-6.4305 6.4305l-17.4617 4.6795c-2.80085.7506-4.46291-.9114-3.71231-3.7123z" opacity=".7"/></g></svg>`
+      },
+      {
+        id: "lightspeed",
+        name: "Lightspeed",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 48 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m0 24c0 6.6274 5.37258 12 12 12v-12c0 6.6274 5.3726 12 12 12v-12c0 6.6274 5.3726 12 12 12s12-5.3726 12-12-5.3726-12-12-12-12 5.3726-12 12v-12c-6.6274 0-12 5.3726-12 12v-12c-6.62742 0-12 5.3726-12 12z" fill="#155eef"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 48 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m0 24c0 6.6274 5.37258 12 12 12v-12c0 6.6274 5.3726 12 12 12v-12c0 6.6274 5.3726 12 12 12s12-5.3726 12-12-5.3726-12-12-12-12 5.3726-12 12v-12c-6.6274 0-12 5.3726-12 12v-12c-6.62742 0-12 5.3726-12 12z" fill="#155eef"/></svg>`
+      },
+      {
+        id: "luminescence",
+        name: "Luminescence",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m32.3008 36h-.1015c-.0261.0402-.0523.0804-.0787.1204-2.7604 1.8201-6.0668 2.8794-9.6206 2.8794-9.665 0-17.5-7.835-17.5-17.5 0-3.5538 1.05931-6.8602 2.87939-9.6206.04009-.0264.08029-.0527.12061-.0788v-.1017c-.04056.0599-.08077.1201-.12061.1805-4.7469 3.1299-7.87939 8.5094-7.87939 14.6206 0 9.665 7.83502 17.5 17.5 17.5 6.1112 0 11.4907-3.1325 14.6206-7.8794.0603-.0398.1204-.0799.1802-.1204z"/><g opacity=".5"><path d="m40.0003 21.5c0 6.1112-3.1325 11.4907-7.8794 14.6206 1.8201-2.7604 2.8794-6.0668 2.8794-9.6206 0-9.665-7.835-17.5-17.5-17.5-3.5538 0-6.8602 1.0593-9.6206 2.8794 3.1299-4.74691 8.5094-7.8794 14.6206-7.8794 9.665 0 17.5 7.835 17.5 17.5z"/><path d="m32.0003 36.1994c.0403-.0261.0805-.0524.1206-.0788-.0398.0604-.08.1206-.1206.1805z"/><path d="m7.80088 12c.02611-.0403.05238-.0805.07882-.1206-.06043.0398-.12059.08-.18048.1206z"/></g></g></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m32.3008 36h-.1015c-.0261.0402-.0523.0804-.0787.1204-2.7604 1.8201-6.0668 2.8794-9.6206 2.8794-9.665 0-17.5-7.835-17.5-17.5 0-3.5538 1.05931-6.8602 2.87939-9.6206.04009-.0264.08029-.0527.12061-.0788v-.1017c-.04056.0599-.08077.1201-.12061.1805-4.7469 3.1299-7.87939 8.5094-7.87939 14.6206 0 9.665 7.83502 17.5 17.5 17.5 6.1112 0 11.4907-3.1325 14.6206-7.8794.0603-.0398.1204-.0799.1802-.1204z"/><g opacity=".5"><path d="m40.0003 21.5c0 6.1112-3.1325 11.4907-7.8794 14.6206 1.8201-2.7604 2.8794-6.0668 2.8794-9.6206 0-9.665-7.835-17.5-17.5-17.5-3.5538 0-6.8602 1.0593-9.6206 2.8794 3.1299-4.74691 8.5094-7.8794 14.6206-7.8794 9.665 0 17.5 7.835 17.5 17.5z"/><path d="m32.0003 36.1994c.0403-.0261.0805-.0524.1206-.0788-.0398.0604-.08.1206-.1206.1805z"/><path d="m7.80088 12c.02611-.0403.05238-.0805.07882-.1206-.06043.0398-.12059.08-.18048.1206z"/></g></g></svg>`
+      },
+      {
+        id: "luminous",
+        name: "Luminous",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 42 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m14.1061 19.6565c5.499-2.6299 9.8025-7.0929 12.2731-12.67168-1.5939-1.67362-3.666-2.86907-5.8975-3.58634l-1.1954-.39848c-.0797.15939-.1594.39849-.1594.55788-1.9127 5.41936-5.8178 9.80262-11.07766 12.27322-3.66599 1.7533-6.37564 4.9412-7.650763 8.7666l-.398477 1.1955c.159391.0797.39848.1593.557871.1593 1.514209.5579 3.028419 1.2752 4.462939 2.1519 1.99238-3.5864 5.18019-6.6148 9.08529-8.4479z"/><path d="m37.2173 19.9753c-2.9487 4.463-7.0132 8.0494-12.034 10.4403-4.0645 1.9127-7.1726 5.499-8.6071 9.8026l-.3985 1.3549c1.5142 1.3548 3.3472 2.3909 5.3396 3.0284l1.1955.3985c.0796-.1594.1593-.3985.1593-.5579 1.9127-5.4193 5.8178-9.8026 11.0777-12.2732 3.666-1.7533 6.4553-4.9412 7.6507-8.7666l.3985-1.1954c-1.6736-.4782-3.2675-1.2752-4.7817-2.2316z" opacity=".6"/><path d="m12.9903 37.4284c1.9924-4.7818 5.6584-8.6869 10.3604-10.9184 4.3035-2.0721 7.8898-5.26 10.3604-9.1651-1.833-1.7533-3.3472-3.7458-4.463-6.1366-2.9487 5.4193-7.571 9.8026-13.2294 12.5123-3.2675 1.5142-5.8974 4.1442-7.49136 7.3321 1.75326 1.6736 3.18786 3.7457 4.30356 6.0569 0 0 .0797.1594.1594.3188z" opacity=".8"/></g></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 42 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m14.1061 19.6565c5.499-2.6299 9.8025-7.0929 12.2731-12.67168-1.5939-1.67362-3.666-2.86907-5.8975-3.58634l-1.1954-.39848c-.0797.15939-.1594.39849-.1594.55788-1.9127 5.41936-5.8178 9.80262-11.07766 12.27322-3.66599 1.7533-6.37564 4.9412-7.650763 8.7666l-.398477 1.1955c.159391.0797.39848.1593.557871.1593 1.514209.5579 3.028419 1.2752 4.462939 2.1519 1.99238-3.5864 5.18019-6.6148 9.08529-8.4479z"/><path d="m37.2173 19.9753c-2.9487 4.463-7.0132 8.0494-12.034 10.4403-4.0645 1.9127-7.1726 5.499-8.6071 9.8026l-.3985 1.3549c1.5142 1.3548 3.3472 2.3909 5.3396 3.0284l1.1955.3985c.0796-.1594.1593-.3985.1593-.5579 1.9127-5.4193 5.8178-9.8026 11.0777-12.2732 3.666-1.7533 6.4553-4.9412 7.6507-8.7666l.3985-1.1954c-1.6736-.4782-3.2675-1.2752-4.7817-2.2316z" opacity=".5"/><path d="m12.9903 37.4284c1.9924-4.7818 5.6584-8.6869 10.3604-10.9184 4.3035-2.0721 7.8898-5.26 10.3604-9.1651-1.833-1.7533-3.3472-3.7458-4.463-6.1366-2.9487 5.4193-7.571 9.8026-13.2294 12.5123-3.2675 1.5142-5.8974 4.1442-7.49136 7.3321 1.75326 1.6736 3.18786 3.7457 4.30356 6.0569 0 0 .0797.1594.1594.3188z" opacity=".7"/></g></svg>`
+      },
+      {
+        id: "pollinate",
+        name: "Pollinate",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 38 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m25.0008 24c0 3.3137-2.6863 6-6 6s-6-2.6863-6-6 2.6863-6 6-6 6 2.6863 6 6z"/><path d="m25.0008 10c0 3.3137-2.6863 6-6 6s-6-2.6863-6-6c0-3.31371 2.6863-6 6-6s6 2.68629 6 6z"/><path d="m37.125 31c0 3.3137-2.6863 6-6 6s-6-2.6863-6-6 2.6863-6 6-6 6 2.6863 6 6z"/><path d="m37.127 17.0002c0 3.3137-2.6863 6-6 6-3.3138 0-6-2.6863-6-6s2.6862-6 6-6c3.3137 0 6 2.6863 6 6z"/><path d="m25.0008 38c0 3.3137-2.6863 6-6 6s-6-2.6863-6-6 2.6863-6 6-6 6 2.6863 6 6z"/><path d="m12.877 17c0 3.3137-2.6863 6-6.00005 6-3.31371 0-5.999997-2.6863-5.999997-6s2.686287-6 5.999997-6c3.31375 0 6.00005 2.6863 6.00005 6z"/><path d="m12.875 30.9997c0 3.3137-2.6863 6-6 6-3.31371 0-6-2.6863-6-6s2.68629-6 6-6c3.3137 0 6 2.6863 6 6z"/></g></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 38 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m25.0008 24c0 3.3137-2.6863 6-6 6s-6-2.6863-6-6 2.6863-6 6-6 6 2.6863 6 6z"/><path d="m25.0008 10c0 3.3137-2.6863 6-6 6s-6-2.6863-6-6c0-3.31371 2.6863-6 6-6s6 2.68629 6 6z"/><path d="m37.125 31c0 3.3137-2.6863 6-6 6s-6-2.6863-6-6 2.6863-6 6-6 6 2.6863 6 6z"/><path d="m37.127 17.0002c0 3.3137-2.6863 6-6 6-3.3138 0-6-2.6863-6-6s2.6862-6 6-6c3.3137 0 6 2.6863 6 6z"/><path d="m25.0008 38c0 3.3137-2.6863 6-6 6s-6-2.6863-6-6 2.6863-6 6-6 6 2.6863 6 6z"/><path d="m12.877 17c0 3.3137-2.6863 6-6.00005 6-3.31371 0-5.999997-2.6863-5.999997-6s2.686287-6 5.999997-6c3.31375 0 6.00005 2.6863 6.00005 6z"/><path d="m12.875 30.9997c0 3.3137-2.6863 6-6 6-3.31371 0-6-2.6863-6-6s2.68629-6 6-6c3.3137 0 6 2.6863 6 6z"/></g></svg>`
+      },
+      {
+        id: "polymath",
+        name: "Polymath",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 38 48" width="100%" xmlns="http://www.w3.org/2000/svg"><circle cx="19" cy="24" r="16" stroke="#155eef" stroke-width="6"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 38 48" width="100%" xmlns="http://www.w3.org/2000/svg"><circle cx="19" cy="24" r="16" stroke="#fff" stroke-width="6"/></svg>`
+      },
+      {
+        id: "prometheus",
+        name: "Prometheus",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 44 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m10.4993 16.5h-7.29875c-1.76731 0-3.20055 1.4327-3.20055 3.2v2.8h11c2.7614 0 5-2.2386 5-5s2.2386-5 5-5h19c2.2091 0 4-1.7909 4-4v-3h-22.5c-3.0376 0-5.5 2.46243-5.5 5.5 0 3.0376-2.4631 5.5-5.5007 5.5z"/><path d="m10.4993 26.5h-7.29875c-1.76731 0-3.20055 1.4327-3.20055 3.2v2.8h11c2.7614 0 5-2.2386 5-5s2.2386-5 5-5h13c2.2091 0 4-1.7909 4-4v-3h-16.5c-3.0376 0-5.5 2.4624-5.5 5.5s-2.4631 5.5-5.5007 5.5z" opacity=".7"/><path d="m10.4993 36.5h-7.29875c-1.76731 0-3.20055 1.4327-3.20055 3.2v2.8h11c2.7614 0 5-2.2386 5-5s2.2386-5 5-5h7.8c1.7673 0 3.2-1.4327 3.2-3.2v-3.8h-10.5c-3.0376 0-5.5 2.4624-5.5 5.5s-2.4631 5.5-5.5007 5.5z" opacity=".5"/></g></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 44 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m10.4993 16.5h-7.29875c-1.76731 0-3.20055 1.4327-3.20055 3.2v2.8h11c2.7614 0 5-2.2386 5-5s2.2386-5 5-5h19c2.2091 0 4-1.7909 4-4v-3h-22.5c-3.0376 0-5.5 2.46243-5.5 5.5 0 3.0376-2.4631 5.5-5.5007 5.5z"/><path d="m10.4993 26.5h-7.29875c-1.76731 0-3.20055 1.4327-3.20055 3.2v2.8h11c2.7614 0 5-2.2386 5-5s2.2386-5 5-5h13c2.2091 0 4-1.7909 4-4v-3h-16.5c-3.0376 0-5.5 2.4624-5.5 5.5s-2.4631 5.5-5.5007 5.5z" opacity=".75"/><path d="m10.4993 36.5h-7.29875c-1.76731 0-3.20055 1.4327-3.20055 3.2v2.8h11c2.7614 0 5-2.2386 5-5s2.2386-5 5-5h7.8c1.7673 0 3.2-1.4327 3.2-3.2v-3.8h-10.5c-3.0376 0-5.5 2.4624-5.5 5.5s-2.4631 5.5-5.5007 5.5z" opacity=".5"/></g></svg>`
+      },
+      {
+        id: "quantum",
+        name: "Quantum",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 39 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m9 23c0-5.5228 4.4772-10 10-10 5.5229 0 10 4.4772 10 10h9c0-10.4934-8.5066-19-19-19-10.49341 0-18.99999908 8.5066-19 19s8.50659 19 19 19v-9c-5.5228 0-10-4.4771-10-10z"/><path d="m29 23c0 5.5228 4.4772 10 10 10v9c-10.4934 0-19-8.5066-19-19z" opacity=".5"/></g></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 39 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m9 23c0-5.5228 4.4772-10 10-10 5.5229 0 10 4.4772 10 10h9c0-10.4934-8.5066-19-19-19-10.49341 0-18.99999908 8.5066-19 19s8.50659 19 19 19v-9c-5.5228 0-10-4.4771-10-10z"/><path d="m29 23c0 5.5228 4.4772 10 10 10v9c-10.4934 0-19-8.5066-19-19z" opacity=".5"/></g></svg>`
+      },
+      {
+        id: "quartz-ai",
+        name: "QuartzAI",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 44 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m17.6264 6.5h14.8017l11.4661 18.6661-15.7786 15.9489-22.68835-4.0459-5.157719-19.2098zm.5273 4.9692-6.816 15.105 6.4504 5.3411 8.8246-3.7975zm12.3276 15.3 9.2139-2.7073-7.1983-11.7184zm-.6163-17.2692h-9.3468l7.3309 14.4284zm6.9795 18.5263-6.779 1.9919-.5448 5.4109zm-10.5005 9.008.5824-5.7856-6.0573 2.6067zm-6.8394-.5022-10.91261-1.9459 1.64741-5.0264 6.438 5.3308zm-11.69782-9.1824-2.7037-3.0571 1.66868 6.215zm-3.53432-8.5248 4.81433 5.4437 5.50351-12.1963z" fill="#155eef" fill-rule="evenodd"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 44 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m17.6264 6.5h14.8017l11.4661 18.6661-15.7786 15.9489-22.68835-4.0459-5.157719-19.2098zm.5273 4.9692-6.816 15.105 6.4504 5.3411 8.8246-3.7975zm12.3276 15.3 9.2139-2.7073-7.1983-11.7184zm-.6163-17.2692h-9.3468l7.3309 14.4284zm6.9795 18.5263-6.779 1.9919-.5448 5.4109zm-10.5005 9.008.5824-5.7856-6.0573 2.6067zm-6.8394-.5022-10.91261-1.9459 1.64741-5.0264 6.438 5.3308zm-11.69782-9.1824-2.7037-3.0571 1.66868 6.215zm-3.53432-8.5248 4.81433 5.4437 5.50351-12.1963z" fill="#fff" fill-rule="evenodd"/></svg>`
+      },
+      {
+        id: "radius",
+        name: "Radius",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g clip-rule="evenodd" fill="#155eef" fill-rule="evenodd"><path d="m18.5 19v-15h3v15z"/><path d="m18.5 44v-15h3v15z"/><path d="m22.4754 19.404 10.6066-10.60664 2.1214 2.12134-8.4853 8.4853z"/><path d="m4.79776 37.0816 10.60664-10.6066 2.1213 2.1214-10.60662 10.6066z"/><path d="m26.7178 28.5963 8.4853 8.4852-2.1213 2.1214-10.6066-10.6066z"/><path d="m6.91885 8.79727 10.60665 10.60663-2.1214 2.1213-10.60657-10.6066z"/><path d="m18.5 22.5h21.5v3h-21.5z"/><path d="m.00000026 22.5h14.99999974v3h-15z"/></g></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g clip-rule="evenodd" fill="#155eef" fill-rule="evenodd"><path d="m18.5 19v-15h3v15z"/><path d="m18.5 44v-15h3v15z"/><path d="m22.4754 19.404 10.6066-10.60664 2.1214 2.12134-8.4853 8.4853z"/><path d="m4.79776 37.0816 10.60664-10.6066 2.1213 2.1214-10.60662 10.6066z"/><path d="m26.7178 28.5963 8.4853 8.4852-2.1213 2.1214-10.6066-10.6066z"/><path d="m6.91885 8.79727 10.60665 10.60663-2.1214 2.1213-10.60657-10.6066z"/><path d="m18.5 22.5h21.5v3h-21.5z"/><path d="m.00000026 22.5h14.99999974v3h-15z"/></g></svg>`
+      },
+      {
+        id: "railspeed",
+        name: "Railspeed",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 36 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m0 7.5h28.8c2.5202 0 3.7804 0 4.743.49047.8467.43143 1.5351 1.11984 1.9665 1.96657.4905.96256.4905 2.22276.4905 4.74296v1.8h-28.8c-2.52024 0-3.78035 0-4.74296-.4905-.84673-.4314-1.535139-1.1198-1.966569-1.9665-.490471-.9626-.490471-2.2228-.490471-4.743z"/><path d="m0 28.5h28.8c2.5202 0 3.7804 0 4.743-.4905.8467-.4314 1.5351-1.1198 1.9665-1.9665.4905-.9626.4905-2.2228.4905-4.743v-1.8h-28.8c-2.52024 0-3.78035 0-4.74296.4905-.84673.4314-1.535139 1.1198-1.966569 1.9665-.490471.9626-.490471 2.2228-.490471 4.743z"/><path d="m14 31.5h14.8c2.5202 0 3.7804 0 4.743.4905.8467.4314 1.5351 1.1198 1.9665 1.9665.4905.9626.4905 2.2228.4905 4.743v1.8h-14.8c-2.5202 0-3.7804 0-4.743-.4905-.8467-.4314-1.5351-1.1198-1.9665-1.9665-.4905-.9626-.4905-2.2228-.4905-4.743z"/></g></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 36 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m0 7.5h28.8c2.5202 0 3.7804 0 4.743.49047.8467.43143 1.5351 1.11984 1.9665 1.96657.4905.96256.4905 2.22276.4905 4.74296v1.8h-28.8c-2.52024 0-3.78035 0-4.74296-.4905-.84673-.4314-1.535139-1.1198-1.966569-1.9665-.490471-.9626-.490471-2.2228-.490471-4.743z"/><path d="m0 28.5h28.8c2.5202 0 3.7804 0 4.743-.4905.8467-.4314 1.5351-1.1198 1.9665-1.9665.4905-.9626.4905-2.2228.4905-4.743v-1.8h-28.8c-2.52024 0-3.78035 0-4.74296.4905-.84673.4314-1.535139 1.1198-1.966569 1.9665-.490471.9626-.490471 2.2228-.490471 4.743z"/><path d="m14 31.5h14.8c2.5202 0 3.7804 0 4.743.4905.8467.4314 1.5351 1.1198 1.9665 1.9665.4905.9626.4905 2.2228.4905 4.743v1.8h-14.8c-2.5202 0-3.7804 0-4.743-.4905-.8467-.4314-1.5351-1.1198-1.9665-1.9665-.4905-.9626-.4905-2.2228-.4905-4.743z"/></g></svg>`
+      },
+      {
+        id: "refractional",
+        name: "Refractional",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 48 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m48 11h-17.0775c-1.2151 0-2.3644.5524-3.1235 1.5012l-1.598 1.9976c-.7591.9488-1.9084 1.5012-3.1235 1.5012h-15.0775l-4 5h17.0775c1.2151 0 2.3644-.5524 3.1235-1.5012l1.598-1.9976c.7591-.9488 1.9084-1.5012 3.1235-1.5012h15.0775z" fill="#444ce7"/><path d="m46 19h-17.0775c-1.2151 0-2.3644.5524-3.1235 1.5012l-1.598 1.9976c-.7591.9488-1.9084 1.5012-3.1235 1.5012h-15.0775l-4 5h17.0775c1.2151 0 2.3644-.5524 3.1235-1.5012l1.598-1.9976c.7591-.9488 1.9084-1.5012 3.1235-1.5012h15.0775z" fill="#155eef"/><path d="m44 27h-17.0775c-1.2151 0-2.3644.5524-3.1235 1.5012l-1.598 1.9976c-.7591.9488-1.9084 1.5012-3.1235 1.5012h-15.0775l-4 5h17.0775c1.2151 0 2.3644-.5524 3.1235-1.5012l1.598-1.9976c.7591-.9488 1.9084-1.5012 3.1235-1.5012h15.0775z" fill="#8098f9"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 48 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m48 11h-17.0775c-1.2151 0-2.3644.5524-3.1235 1.5012l-1.598 1.9976c-.7591.9488-1.9084 1.5012-3.1235 1.5012h-15.0775l-4 5h17.0775c1.2151 0 2.3644-.5524 3.1235-1.5012l1.598-1.9976c.7591-.9488 1.9084-1.5012 3.1235-1.5012h15.0775z"/><path d="m46 19h-17.0775c-1.2151 0-2.3644.5524-3.1235 1.5012l-1.598 1.9976c-.7591.9488-1.9084 1.5012-3.1235 1.5012h-15.0775l-4 5h17.0775c1.2151 0 2.3644-.5524 3.1235-1.5012l1.598-1.9976c.7591-.9488 1.9084-1.5012 3.1235-1.5012h15.0775z"/><path d="m44 27h-17.0775c-1.2151 0-2.3644.5524-3.1235 1.5012l-1.598 1.9976c-.7591.9488-1.9084 1.5012-3.1235 1.5012h-15.0775l-4 5h17.0775c1.2151 0 2.3644-.5524 3.1235-1.5012l1.598-1.9976c.7591-.9488 1.9084-1.5012 3.1235-1.5012h15.0775z"/></g></svg>`
+      },
+      {
+        id: "renaissance",
+        name: "Renaissance",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 35 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m12.7018 5c1.841 0 3.4172 1.31967 3.7408 3.13199l.4648 2.60271c.3236 1.8123 1.8998 3.132 3.7408 3.132h3.1518c4.8969 0 8.8667 3.9697 8.8667 8.8666 0 2.9333-1.4244 5.5339-3.6191 7.1479.92.3126 1.6466.809 2.1799 1.461.549.7191.9411 1.7411 1.1764 3.028.0392.3406.0883.6718.1373 1.003s.098.6624.1372 1.003c.0408.3538.0709.6566.096.9083.0232.233.042.4223.0609.5679.0784 1.0598.1961 1.9303.3529 2.5738.1655.9048.4994 1.7867.9727 2.5738h-6.6982c-.3137-.6056-.5098-1.3248-.6666-2.1196-.1349-.6836-.2408-1.5352-.3676-2.5548-.0207-.1659-.0418-.3362-.0638-.5111l-.2353-1.7411c-.1961-1.3247-.4314-2.271-.6667-2.8766-.2745-.5677-.7058-.9841-1.2941-1.2112-.6274-.2271-1.5686-.3856-2.9019-.3856h-.3018c-1.841 0-3.4172-1.3197-3.7408-3.132l-.4648-2.6027c-.3236-1.8123-1.8998-3.132-3.7408-3.132h-5.68517v10.1334h-6.33333v-27.8667zm13.6315 17.7333c0 1.3992-1.1342 2.5334-2.5333 2.5334h-3.1518c-1.841 0-3.4172-1.3197-3.7408-3.132l-.4648-2.6027c-.3236-1.8123-1.8998-3.132-3.7408-3.132h-5.36847v-5.0667h5.68517c1.841 0 3.4172 1.3197 3.7408 3.132l.4647 2.6027c.3237 1.8123 1.8999 3.132 3.7409 3.132h2.8351c1.3991 0 2.5333 1.1342 2.5333 2.5333z" fill="#1849a9" fill-rule="evenodd"/></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 35 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m12.7018 5c1.841 0 3.4172 1.31967 3.7408 3.13199l.4648 2.60271c.3236 1.8123 1.8998 3.132 3.7408 3.132h3.1518c4.8969 0 8.8667 3.9697 8.8667 8.8666 0 2.9333-1.4244 5.5339-3.6191 7.1479.92.3126 1.6466.809 2.1799 1.461.549.7191.9411 1.7411 1.1764 3.028.0392.3406.0883.6718.1373 1.003s.098.6624.1372 1.003c.0408.3538.0709.6566.096.9083.0232.233.042.4223.0609.5679.0784 1.0598.1961 1.9303.3529 2.5738.1655.9048.4994 1.7867.9727 2.5738h-6.6982c-.3137-.6056-.5098-1.3247-.6666-2.1196-.1349-.6836-.2408-1.5352-.3676-2.5548-.0207-.1659-.0418-.3362-.0638-.5111l-.2353-1.7411c-.1961-1.3247-.4314-2.271-.6667-2.8766-.2745-.5677-.7058-.9841-1.2941-1.2112-.6274-.2271-1.5686-.3856-2.9019-.3856h-.3018c-1.841 0-3.4172-1.3197-3.7408-3.132l-.4648-2.6027c-.3236-1.8123-1.8998-3.132-3.7408-3.132h-5.68517v10.1334h-6.33333v-27.8667zm13.6315 17.7333c0 1.3992-1.1342 2.5334-2.5333 2.5334h-3.1518c-1.841 0-3.4172-1.3197-3.7408-3.132l-.4648-2.6027c-.3236-1.8123-1.8998-3.132-3.7408-3.132h-5.36847v-5.0667h5.68517c1.841 0 3.4172 1.3197 3.7408 3.132l.4647 2.6027c.3237 1.8123 1.8999 3.132 3.7409 3.132h2.8351c1.3991 0 2.5333 1.1342 2.5333 2.5333z" fill="#fff" fill-rule="evenodd"/></svg>`
+      },
+      {
+        id: "sisyphus",
+        name: "Sisyphus",
+        lightSvg: `<svg fill="none" height="100%" viewBox="0 0 32 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m.599609 19.2002h9.59998v9.59999h-9.59998z"/><path d="m31.4004 28.7998h9.6v9.59999h-9.6z" transform="matrix(-1 0 -0 -1 62.8008 57.5996)"/><path d="m10.1992 19.2001 11.6-9.6v9.6l-11.6 9.6z" opacity=".2"/><path d="m21.7988 28.7999-11.6 9.6v-9.6l11.6-9.6z" opacity=".5"/><path d="m.599609 19.2 21.199991-19.2v9.59999l-11.6 9.60001z" opacity=".6"/><path d="m31.4004 28.8-21.2 19.2v-9.6l11.6-9.6z" opacity=".7"/></g></svg>`,
+        darkSvg: `<svg fill="none" height="100%" viewBox="0 0 32 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m.599609 19.2002h9.59998v9.59999h-9.59998z"/><path d="m31.4004 28.7998h9.6v9.59999h-9.6z" transform="matrix(-1 0 -0 -1 62.8008 57.5996)"/><path d="m10.1992 19.2001 11.6-9.6v9.6l-11.6 9.6z" opacity=".2"/><path d="m21.7988 28.7999-11.6 9.6v-9.6l11.6-9.6z" opacity=".5"/><path d="m.599609 19.2 21.199991-19.2v9.59999l-11.6 9.60001z" opacity=".6"/><path d="m31.4004 28.8-21.2 19.2v-9.6l11.6-9.6z" opacity=".7"/></g></svg>`
+      },
+      {
+        id: "solaris-energy",
+        name: "Solaris Energy",
+        lightSvg: `<svg width="100%" height="100%" viewBox="0 0 40 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 4V16.3604C20 19.087 16.6569 20.3998 14.8016 18.4017L7 10M40 24H27.6396C24.913 24 23.6002 20.6569 25.5983 18.8016L34 11M20 44V31.6396C20 28.913 23.3431 27.6002 25.1984 29.5983L33 38M0 24L12.3604 24C15.087 24 16.3998 27.3431 14.4017 29.1984L6 37" stroke="#175CD3" stroke-width="4"/></svg>`,
+        darkSvg: `<svg width="100%" height="100%" viewBox="0 0 40 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 4V16.3604C20 19.087 16.6569 20.3998 14.8016 18.4017L7 10M40 24H27.6396C24.913 24 23.6002 20.6569 25.5983 18.8016L34 11M20 44V31.6396C20 28.913 23.3431 27.6002 25.1984 29.5983L33 38M0 24L12.3604 24C15.087 24 16.3998 27.3431 14.4017 29.1984L6 37" stroke="white" stroke-width="4"/></svg>`
+      }
+    ];
+  }
+});
+
+// features/keystone/lib/storefront-branding.ts
+function normalizeStorefrontHue(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return DEFAULT_STOREFRONT_HUE;
+  const rounded = Math.round(numeric);
+  return (rounded % 360 + 360) % 360;
+}
+function isStudioLogoColor(value) {
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value !== "string" || !value.trim()) return false;
+  return Number.isFinite(Number(value.trim()));
+}
+function normalizeStudioLogoColor(value) {
+  const numeric = Number.parseFloat(String(value ?? DEFAULT_STUDIO_LOGO_COLOR));
+  if (!Number.isFinite(numeric)) return DEFAULT_STUDIO_LOGO_COLOR;
+  return String((numeric % 360 + 360) % 360);
+}
+var DEFAULT_STOREFRONT_HUE, DEFAULT_STUDIO_LOGO_ICON, DEFAULT_LIBRARY_LOGO_COLOR, DEFAULT_STUDIO_LOGO_COLOR, NAMED_COLORS;
+var init_storefront_branding = __esm({
+  "features/keystone/lib/storefront-branding.ts"() {
+    "use strict";
+    init_icon_registry();
+    DEFAULT_STOREFRONT_HUE = 16;
+    DEFAULT_STUDIO_LOGO_ICON = LOGO_ICONS.find((icon) => icon.id === "boltshift").lightSvg;
+    DEFAULT_LIBRARY_LOGO_COLOR = "151";
+    DEFAULT_STUDIO_LOGO_COLOR = "0";
+    NAMED_COLORS = Object.fromEntries(
+      "aliceblue:f0f8ff antiquewhite:faebd7 aqua:00ffff aquamarine:7fffd4 azure:f0ffff beige:f5f5dc bisque:ffe4c4 black:000000 blanchedalmond:ffebcd blue:0000ff blueviolet:8a2be2 brown:a52a2a burlywood:deb887 cadetblue:5f9ea0 chartreuse:7fff00 chocolate:d2691e coral:ff7f50 cornflowerblue:6495ed cornsilk:fff8dc crimson:dc143c cyan:00ffff darkblue:00008b darkcyan:008b8b darkgoldenrod:b8860b darkgray:a9a9a9 darkgreen:006400 darkgrey:a9a9a9 darkkhaki:bdb76b darkmagenta:8b008b darkolivegreen:556b2f darkorange:ff8c00 darkorchid:9932cc darkred:8b0000 darksalmon:e9967a darkseagreen:8fbc8f darkslateblue:483d8b darkslategray:2f4f4f darkslategrey:2f4f4f darkturquoise:00ced1 darkviolet:9400d3 deeppink:ff1493 deepskyblue:00bfff dimgray:696969 dimgrey:696969 dodgerblue:1e90ff firebrick:b22222 floralwhite:fffaf0 forestgreen:228b22 fuchsia:ff00ff gainsboro:dcdcdc ghostwhite:f8f8ff gold:ffd700 goldenrod:daa520 gray:808080 green:008000 greenyellow:adff2f grey:808080 honeydew:f0fff0 hotpink:ff69b4 indianred:cd5c5c indigo:4b0082 ivory:fffff0 khaki:f0e68c lavender:e6e6fa lavenderblush:fff0f5 lawngreen:7cfc00 lemonchiffon:fffacd lightblue:add8e6 lightcoral:f08080 lightcyan:e0ffff lightgoldenrodyellow:fafad2 lightgray:d3d3d3 lightgreen:90ee90 lightgrey:d3d3d3 lightpink:ffb6c1 lightsalmon:ffa07a lightseagreen:20b2aa lightskyblue:87cefa lightslategray:778899 lightslategrey:778899 lightsteelblue:b0c4de lightyellow:ffffe0 lime:00ff00 limegreen:32cd32 linen:faf0e6 magenta:ff00ff maroon:800000 mediumaquamarine:66cdaa mediumblue:0000cd mediumorchid:ba55d3 mediumpurple:9370db mediumseagreen:3cb371 mediumslateblue:7b68ee mediumspringgreen:00fa9a mediumturquoise:48d1cc mediumvioletred:c71585 midnightblue:191970 mintcream:f5fffa mistyrose:ffe4e1 moccasin:ffe4b5 navajowhite:ffdead navy:000080 oldlace:fdf5e6 olive:808000 olivedrab:6b8e23 orange:ffa500 orangered:ff4500 orchid:da70d6 palegoldenrod:eee8aa palegreen:98fb98 paleturquoise:afeeee palevioletred:db7093 papayawhip:ffefd5 peachpuff:ffdab9 peru:cd853f pink:ffc0cb plum:dda0dd powderblue:b0e0e6 purple:800080 rebeccapurple:663399 red:ff0000 rosybrown:bc8f8f royalblue:4169e1 saddlebrown:8b4513 salmon:fa8072 sandybrown:f4a460 seagreen:2e8b57 seashell:fff5ee sienna:a0522d silver:c0c0c0 skyblue:87ceeb slateblue:6a5acd slategray:708090 slategrey:708090 snow:fffafa springgreen:00ff7f steelblue:4682b4 tan:d2b48c teal:008080 thistle:d8bfd8 tomato:ff6347 turquoise:40e0d0 violet:ee82ee wheat:f5deb3 white:ffffff whitesmoke:f5f5f5 yellow:ffff00 yellowgreen:9acd32".split(" ").map((entry) => entry.split(":"))
+    );
+  }
+});
+
+// lib/time-zone-label.ts
+function intlName(timeZone, style, locale, date) {
+  try {
+    return new Intl.DateTimeFormat(locale, { timeZone, timeZoneName: style }).formatToParts(date).find((part) => part.type === "timeZoneName")?.value;
+  } catch {
+    return void 0;
+  }
+}
+function timeZoneCity(timeZone) {
+  const last = timeZone.split("/").pop() || timeZone;
+  return last.replace(/_/g, " ");
+}
+function timeZoneNames(timeZone, locale = "en-US", date = /* @__PURE__ */ new Date()) {
+  const zone = typeof timeZone === "string" ? timeZone.trim() : "";
+  if (!zone) return null;
+  const known = KNOWN[zone];
+  if (known) return known;
+  const long = intlName(zone, "longGeneric", locale, date);
+  if (!long || isOffsetOnly(long)) {
+    const offset = intlName(zone, "shortGeneric", locale, date) || long;
+    return offset ? { long: `${timeZoneCity(zone)} time`, short: offset } : null;
+  }
+  const short = intlName(zone, "shortGeneric", locale, date);
+  return { long, short: isAbbreviation(short) ? short : void 0 };
+}
+function timeZoneLabel(timeZone, options = {}) {
+  const zone = typeof timeZone === "string" ? timeZone.trim() : "";
+  if (!zone) return "";
+  const names = timeZoneNames(zone, options.locale, options.date);
+  if (!names) return `${timeZoneCity(zone)} time`;
+  if (options.city) {
+    const city = timeZoneCity(zone);
+    return names.long.toLowerCase().includes(city.toLowerCase()) || /^(UTC|GMT)$/i.test(city) ? names.long : `${names.long} \xB7 ${city}`;
+  }
+  return names.short ? `${names.long} (${names.short})` : names.long;
+}
+var KNOWN, isAbbreviation, isOffsetOnly;
+var init_time_zone_label = __esm({
+  "lib/time-zone-label.ts"() {
+    "use strict";
+    KNOWN = {
+      "America/Los_Angeles": { long: "Pacific Time", short: "PT" },
+      "America/Vancouver": { long: "Pacific Time", short: "PT" },
+      "America/Tijuana": { long: "Pacific Time", short: "PT" },
+      "America/Denver": { long: "Mountain Time", short: "MT" },
+      "America/Boise": { long: "Mountain Time", short: "MT" },
+      "America/Edmonton": { long: "Mountain Time", short: "MT" },
+      "America/Phoenix": { long: "Mountain Standard Time", short: "MST" },
+      "America/Chicago": { long: "Central Time", short: "CT" },
+      "America/Winnipeg": { long: "Central Time", short: "CT" },
+      "America/Mexico_City": { long: "Central Time", short: "CT" },
+      "America/New_York": { long: "Eastern Time", short: "ET" },
+      "America/Detroit": { long: "Eastern Time", short: "ET" },
+      "America/Toronto": { long: "Eastern Time", short: "ET" },
+      "America/Indiana/Indianapolis": { long: "Eastern Time", short: "ET" },
+      "America/Halifax": { long: "Atlantic Time", short: "AT" },
+      "America/Anchorage": { long: "Alaska Time", short: "AKT" },
+      "Pacific/Honolulu": { long: "Hawaii Time", short: "HT" },
+      "Europe/London": { long: "UK Time" },
+      "UTC": { long: "Coordinated Universal Time", short: "UTC" },
+      "Etc/UTC": { long: "Coordinated Universal Time", short: "UTC" },
+      "GMT": { long: "Greenwich Mean Time", short: "GMT" },
+      "Etc/GMT": { long: "Greenwich Mean Time", short: "GMT" }
+    };
+    isAbbreviation = (value) => Boolean(value && /^[A-Z]{2,5}$/.test(value));
+    isOffsetOnly = (value) => !value || /^(GMT|UTC)([+-−]\d|$)/.test(value);
+  }
+});
+
+// lib/timezone.ts
+function normalizeTimeZone(value, fallback = "UTC") {
+  const candidate = typeof value === "string" && value.trim() ? value.trim() : fallback;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: candidate }).format(/* @__PURE__ */ new Date());
+    return candidate;
+  } catch {
+    throw new Error("timezone must be a valid IANA time-zone name");
+  }
+}
+function resolveStudioTimeZone(studioSettingsTimeZone, organizationTimeZone) {
+  return normalizeTimeZone(studioSettingsTimeZone || organizationTimeZone || "UTC");
+}
+function localDateParts(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: normalizeTimeZone(timeZone),
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(date);
+  const value = (type) => Number(parts.find((part) => part.type === type)?.value);
+  return {
+    year: value("year"),
+    month: value("month"),
+    day: value("day"),
+    hour: value("hour"),
+    minute: value("minute"),
+    second: value("second")
+  };
+}
+function timeZoneOffsetMilliseconds(date, timeZone) {
+  const parts = localDateParts(date, timeZone);
+  const representedAsUtc = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second
+  );
+  return representedAsUtc - Math.floor(date.getTime() / 1e3) * 1e3;
+}
+function localTimeToUtc(parts, timeZone) {
+  const localEpoch = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second ?? 0
+  );
+  let candidate = new Date(localEpoch);
+  candidate = new Date(localEpoch - timeZoneOffsetMilliseconds(candidate, timeZone));
+  candidate = new Date(localEpoch - timeZoneOffsetMilliseconds(candidate, timeZone));
+  return candidate;
+}
+function exactLocalTimeToUtc(parts, timeZone) {
+  const zone = normalizeTimeZone(timeZone);
+  const second = parts.second ?? 0;
+  const integers = [parts.year, parts.month, parts.day, parts.hour, parts.minute, second];
+  if (!integers.every(Number.isInteger) || parts.month < 1 || parts.month > 12 || parts.hour < 0 || parts.hour > 23 || parts.minute < 0 || parts.minute > 59 || second < 0 || second > 59) {
+    throw new NonexistentLocalTimeError("Choose a valid date and time");
+  }
+  const localEpoch = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, second);
+  const calendar = new Date(localEpoch);
+  if (calendar.getUTCFullYear() !== parts.year || calendar.getUTCMonth() !== parts.month - 1 || calendar.getUTCDate() !== parts.day) {
+    throw new NonexistentLocalTimeError("Choose a valid date and time");
+  }
+  const offsets = new Set([-36, -12, 0, 12, 36].map((hours) => timeZoneOffsetMilliseconds(new Date(localEpoch + hours * 36e5), zone)));
+  const matches = [...offsets].map((offset) => new Date(localEpoch - offset)).filter((candidate) => {
+    const round = localDateParts(candidate, zone);
+    return round.year === parts.year && round.month === parts.month && round.day === parts.day && round.hour === parts.hour && round.minute === parts.minute && round.second === second;
+  }).sort((a, b) => a.getTime() - b.getTime());
+  if (!matches.length) throw new NonexistentLocalTimeError(`That time does not exist in ${timeZoneLabel(zone)} because of a daylight-saving change. Choose another time.`);
+  return matches[0];
+}
+function localDateStart(dateKey, timeZone) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateKey));
+  if (!match) throw new NonexistentLocalTimeError("Choose a valid date");
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  for (let minutes = 0; minutes < 24 * 60; minutes += 1) {
+    try {
+      return exactLocalTimeToUtc({ year, month, day, hour: Math.floor(minutes / 60), minute: minutes % 60 }, timeZone);
+    } catch (error) {
+      if (!(error instanceof NonexistentLocalTimeError) || minutes === 0 && /valid date and time/.test(error.message)) throw new NonexistentLocalTimeError("Choose a valid date");
+    }
+  }
+  throw new NonexistentLocalTimeError("Choose a valid date");
+}
+function nextDateKey(dateKey) {
+  const date = /* @__PURE__ */ new Date(`${dateKey}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+function zonedStartOfDay(date, timeZone) {
+  const local = localDateParts(date, timeZone);
+  return localTimeToUtc({ ...local, hour: 0, minute: 0, second: 0 }, timeZone);
+}
+function zonedStartOfNextDay(date, timeZone) {
+  const local = localDateParts(date, timeZone);
+  const next = new Date(Date.UTC(local.year, local.month - 1, local.day + 1));
+  return localTimeToUtc({
+    year: next.getUTCFullYear(),
+    month: next.getUTCMonth() + 1,
+    day: next.getUTCDate(),
+    hour: 0,
+    minute: 0,
+    second: 0
+  }, timeZone);
+}
+function zonedStartOfMonth(date, timeZone) {
+  const local = localDateParts(date, timeZone);
+  return localTimeToUtc({ year: local.year, month: local.month, day: 1, hour: 0, minute: 0, second: 0 }, timeZone);
+}
+function localWeekdayAtOffset(now, timeZone, dayOffset) {
+  const local = localDateParts(now, timeZone);
+  return new Date(Date.UTC(local.year, local.month - 1, local.day + dayOffset)).getUTCDay();
+}
+function futureLocalOccurrence(now, timeZone, dayOffset, hour, minute) {
+  const local = localDateParts(now, timeZone);
+  const target = new Date(Date.UTC(local.year, local.month - 1, local.day + dayOffset));
+  try {
+    return exactLocalTimeToUtc({
+      year: target.getUTCFullYear(),
+      month: target.getUTCMonth() + 1,
+      day: target.getUTCDate(),
+      hour,
+      minute,
+      second: 0
+    }, timeZone);
+  } catch (error) {
+    if (error instanceof NonexistentLocalTimeError) return null;
+    throw error;
+  }
+}
+var NonexistentLocalTimeError;
+var init_timezone = __esm({
+  "lib/timezone.ts"() {
+    "use strict";
+    init_time_zone_label();
+    NonexistentLocalTimeError = class extends Error {
+    };
+  }
+});
+
+// features/keystone/lib/studio-hours.ts
+function parseClockMinute(value) {
+  const match = value.trim().match(/^(\d{1,2})(?::([0-5]\d))?\s*(am|pm)?$/i);
+  if (!match) throw new Error("Hours need a supported time");
+  let hour = Number(match[1]);
+  if (match[3]) {
+    if (hour < 1 || hour > 12) throw new Error("Hours have an invalid clock hour");
+    hour = hour % 12 + (match[3].toLowerCase() === "pm" ? 12 : 0);
+  } else if (hour > 23 || !match[2]) throw new Error("Use HH:mm for 24-hour times");
+  return hour * 60 + Number(match[2] || 0);
+}
+function range(open, close) {
+  const start = parseClockMinute(open);
+  const end = parseClockMinute(close);
+  if (start === end) throw new Error("Equal opening and closing times are ambiguous");
+  return { start, end };
+}
+function parseDayHours(value) {
+  try {
+    if (typeof value === "string") {
+      const text43 = value.trim().toLowerCase();
+      if (!text43) return null;
+      if (text43 === "closed") return "closed";
+      if (text43 === "24/7" || text43 === "24 hours" || text43 === "open 24 hours") return "all";
+      return text43.split(/\s*[,;]\s*/).filter(Boolean).map((part) => {
+        const [open, close, extra] = part.split(/\s*[-–—]\s*/);
+        if (!open || !close || extra !== void 0) throw new Error("Hours need one opening and closing time");
+        return range(open, close);
+      });
+    }
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const day = value;
+      if (day.enabled === false) return "closed";
+      if (day.allDay === true) return "all";
+      if (!Array.isArray(day.ranges) || !day.ranges.length) return null;
+      const ranges = day.ranges.map((entry) => {
+        if (typeof entry?.open !== "string" || typeof entry?.close !== "string") throw new Error("Hours need opening and closing times");
+        return range(entry.open, entry.close);
+      });
+      if (ranges.length === 1 && ranges[0].start === 0 && ranges[0].end === 23 * 60 + 59) return "all";
+      return ranges;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+function editorWeeklyHours(hours) {
+  if (!hours || typeof hours !== "object" || Array.isArray(hours)) return {};
+  return Object.fromEntries(Object.entries(hours).map(([day, value]) => {
+    const parsed = parseDayHours(value);
+    if (parsed === "closed") return [day, { enabled: false, ranges: [] }];
+    if (parsed === "all") return [day, { enabled: true, allDay: true, ranges: [] }];
+    if (parsed) return [day, { enabled: true, ranges: parsed.map((entry) => ({ open: clock(entry.start), close: clock(entry.end) })) }];
+    return [day, value];
+  }));
+}
+var clock;
+var init_studio_hours = __esm({
+  "features/keystone/lib/studio-hours.ts"() {
+    "use strict";
+    clock = (minute) => `${String(Math.floor(minute / 60) % 24).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
+  }
+});
+
+// features/keystone/lib/studio-settings-content.ts
+function publicCtaHref(value) {
+  if (typeof value !== "string") return null;
+  const href = value.trim();
+  if (!href.startsWith("/") || href.startsWith("//") || href.includes("\\") || href.includes("..") || /[\u0000-\u001f\u007f]/.test(href) || href.length > 500) return null;
+  let url;
+  try {
+    url = new URL(href, "https://storefront.invalid");
+  } catch {
+    return null;
+  }
+  if (url.origin !== "https://storefront.invalid") return null;
+  return PUBLIC_CTA_PATHS.some((pattern) => pattern.test(url.pathname)) ? `${url.pathname}${url.search}${url.hash}` : null;
+}
+function text21(value, field, max, required = true) {
+  if (value == null || value === "") {
+    if (required) throw new Error(`${field} is required`);
+    return "";
+  }
+  if (typeof value !== "string") throw new Error(`${field} must be text`);
+  const trimmed = value.trim();
+  if (required && !trimmed) throw new Error(`${field} is required`);
+  if (trimmed.length > max) throw new Error(`${field} must be ${max} characters or fewer`);
+  return trimmed;
+}
+function list21(value, field, max) {
+  if (!Array.isArray(value)) throw new Error(`${field} must be a list`);
+  if (value.length > max) throw new Error(`${field} allows at most ${max} entries`);
+  return value;
+}
+function validateContactTopics(value) {
+  const limits = SETTINGS_LIMITS.contactTopics;
+  return list21(value, "Contact cards", limits.items).map((item, index) => {
+    const label = `Contact card ${index + 1}`;
+    const details = list21(item?.details, `${label} details`, limits.details).map((detail, line) => text21(detail, `${label} detail ${line + 1}`, limits.detail));
+    if (!details.length) throw new Error(`${label} needs at least one detail`);
+    return { title: text21(item?.title, `${label} title`, limits.title), details };
+  });
+}
+function validateFacilityHighlights(value) {
+  const limits = SETTINGS_LIMITS.facilityHighlights;
+  return list21(value, "Facility highlights", limits.items).map((item, index) => {
+    const label = `Facility highlight ${index + 1}`;
+    return {
+      title: text21(item?.title, `${label} title`, limits.title),
+      description: text21(item?.description, `${label} description`, limits.description),
+      features: list21(item?.features ?? [], `${label} features`, limits.features).map((feature, line) => text21(feature, `${label} feature ${line + 1}`, limits.feature))
+    };
+  });
+}
+function validateHeroStats(value) {
+  const limits = SETTINGS_LIMITS.heroStats;
+  return list21(value, "Hero stats", limits.items).map((item, index) => ({
+    value: text21(item?.value, `Hero stat ${index + 1} value`, limits.value),
+    label: text21(item?.label, `Hero stat ${index + 1} label`, limits.label)
+  }));
+}
+function validateWeeklyHours(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Opening hours must list each day of the week");
+  const source = value;
+  const output = {};
+  for (const day of WEEKDAY_KEYS) {
+    const parsed = parseDayHours(source[day]);
+    if (!parsed) throw new Error(`Opening hours for ${day[0].toUpperCase()}${day.slice(1)} are missing or unreadable; set closed, all day, or valid times`);
+    output[day] = source[day];
+  }
+  if (JSON.stringify(output).length > SETTINGS_LIMITS.hoursJson) throw new Error("Opening hours are too long");
+  return output;
+}
+var SETTINGS_LIMITS, WEEKDAY_KEYS, PUBLIC_CTA_PATHS;
+var init_studio_settings_content = __esm({
+  "features/keystone/lib/studio-settings-content.ts"() {
+    "use strict";
+    init_studio_hours();
+    SETTINGS_LIMITS = {
+      contactTopics: { items: 12, title: 100, details: 12, detail: 300 },
+      facilityHighlights: { items: 12, title: 200, description: 1e3, features: 20, feature: 100 },
+      heroStats: { items: 6, value: 50, label: 100 },
+      hoursJson: 1e4
+    };
+    WEEKDAY_KEYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+    PUBLIC_CTA_PATHS = [
+      /^\/$/,
+      /^\/classes$/,
+      /^\/classes\/[A-Za-z0-9_-]{1,64}$/,
+      /^\/schedule$/,
+      /^\/memberships$/,
+      /^\/join$/,
+      /^\/instructors$/,
+      /^\/instructors\/[A-Za-z0-9_-]{1,64}$/,
+      /^\/facilities$/,
+      /^\/contact$/,
+      /^\/policies$/,
+      /^\/waiver$/,
+      /^\/account$/
+    ];
+  }
+});
+
+// features/keystone/models/Spot.ts
+var import_core41, import_access69, import_fields44, APPARATUS, Spot;
+var init_Spot = __esm({
+  "features/keystone/models/Spot.ts"() {
+    "use strict";
+    import_core41 = require("@keystone-6/core");
+    import_access69 = require("@keystone-6/core/access");
+    import_fields44 = require("@keystone-6/core/fields");
+    init_access();
+    init_tenantPolicy();
+    init_trackingFields();
+    init_tenantRelationships();
+    APPARATUS = ["reformer", "tower", "chair", "cadillac", "barrel", "mat", "other"];
+    Spot = (0, import_core41.list)({
+      db: { extendPrismaSchema: compoundUniqueDb("roomId, number") },
+      access: {
+        operation: { query: isSignedIn, create: import_access69.denyAll, update: import_access69.denyAll, delete: import_access69.denyAll },
+        filter: { query: tenantFilter }
+      },
+      ui: { labelField: "label", listView: { initialColumns: ["room", "number", "label", "apparatus", "isBookable"] } },
+      fields: {
+        organization: (0, import_fields44.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
+        room: (0, import_fields44.relationship)({ ref: "Room.spots", db: { extendPrismaSchema: requiredRelationshipDb("room") } }),
+        number: (0, import_fields44.integer)({ validation: { isRequired: true, min: 1, max: 500 } }),
+        label: (0, import_fields44.text)({ validation: { isRequired: true } }),
+        apparatus: (0, import_fields44.select)({ type: "string", options: APPARATUS.map((value) => ({ label: value[0].toUpperCase() + value.slice(1), value })), defaultValue: "reformer", validation: { isRequired: true } }),
+        x: (0, import_fields44.integer)({ defaultValue: 0, validation: { isRequired: true, min: 0, max: 99 } }),
+        y: (0, import_fields44.integer)({ defaultValue: 0, validation: { isRequired: true, min: 0, max: 99 } }),
+        isBookable: (0, import_fields44.checkbox)({ defaultValue: true }),
+        outOfServiceFrom: (0, import_fields44.timestamp)(),
+        outOfServiceUntil: (0, import_fields44.timestamp)(),
+        /** Set when the spot is removed from the layout; kept for booking history. */
+        retiredAt: (0, import_fields44.timestamp)(),
+        notes: (0, import_fields44.text)(),
+        ...trackingFields
+      }
+    });
+  }
+});
+
+// features/keystone/access/currentRoleActor.ts
+async function currentRoleActor(context) {
+  const session = context.session;
+  const organizationId = getTenantId(session);
+  if (!session?.itemId || !organizationId) throw new Error("Organization session required");
+  const user = await context.query.User.findOne({
+    where: { id: session.itemId },
+    query: "id organization { id } role { id canManageAllRecords canManagePeople canManageCheckIns canManageFacilities isInstructor organization { id } }"
+  });
+  if (!user || user.organization?.id !== organizationId || user.role && user.role.organization?.id !== organizationId) {
+    throw new Error("Actor organization mismatch");
+  }
+  const role = user.role;
+  return {
+    userId: session.itemId,
+    organizationId,
+    canManageAllRecords: Boolean(role?.canManageAllRecords),
+    canManagePeople: Boolean(role?.canManagePeople),
+    canManageCheckIns: Boolean(role?.canManageCheckIns),
+    canManageFacilities: Boolean(role?.canManageFacilities),
+    isInstructor: Boolean(role?.isInstructor)
+  };
+}
+var init_currentRoleActor = __esm({
+  "features/keystone/access/currentRoleActor.ts"() {
+    "use strict";
+    init_tenantPolicy();
+  }
+});
+
+// features/keystone/mutations/trainerQualifications.ts
+function qualificationSummary(entry, at = /* @__PURE__ */ new Date()) {
+  if (typeof entry === "string") return entry.trim() ? { name: entry.trim().slice(0, 200), status: "listed" } : null;
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+  const item = entry;
+  const name = typeof item.name === "string" ? item.name.trim().slice(0, 200) : "";
+  if (!name) return null;
+  if (item.revoked === true) return { name, status: "revoked" };
+  const expiresAt = item.expiresAt ? new Date(String(item.expiresAt)) : null;
+  if (expiresAt && Number.isFinite(expiresAt.getTime()) && expiresAt <= at) return { name, status: "expired" };
+  const verifiedAt = item.verifiedAt ? new Date(String(item.verifiedAt)) : null;
+  if (item.required === true && !(verifiedAt && Number.isFinite(verifiedAt.getTime()) && verifiedAt <= at)) return { name, status: "unverified" };
+  return { name, status: "current" };
+}
+function publicQualificationNames(value, at = /* @__PURE__ */ new Date()) {
+  return (Array.isArray(value) ? value : []).map((entry) => qualificationSummary(entry, at)).filter((entry) => Boolean(entry) && (entry.status === "listed" || entry.status === "current")).map((entry) => entry.name).slice(0, 50);
+}
+function assertInstructorQualifications(instructor, at) {
+  const entries = Array.isArray(instructor.certifications) ? instructor.certifications : [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object" || entry.required !== true) continue;
+    const expiresAt = new Date(entry.expiresAt);
+    const verifiedAt = new Date(entry.verifiedAt);
+    if (!entry.name || !entry.evidenceReference || !Number.isFinite(expiresAt.getTime()) || expiresAt <= at || !Number.isFinite(verifiedAt.getTime()) || verifiedAt > at || entry.revoked === true) throw new Error("A required instructor qualification is expired, revoked or unverified");
+  }
+}
+var init_trainerQualifications = __esm({
+  "features/keystone/mutations/trainerQualifications.ts"() {
+    "use strict";
   }
 });
 
@@ -1450,6 +2839,1344 @@ function newPaymentChargesEnabled() {
 var init_stripe_environment_provider = __esm({
   "features/keystone/lib/stripe-environment-provider.ts"() {
     "use strict";
+  }
+});
+
+// features/keystone/queries/publicStudio.ts
+var publicStudio_exports = {};
+__export(publicStudio_exports, {
+  PUBLIC_STUDIO_QUERY_NAMES: () => PUBLIC_STUDIO_QUERY_NAMES,
+  configuredStorefrontOrganization: () => configuredStorefrontOrganization,
+  documentToPlainText: () => documentToPlainText,
+  getPublicStudioClassInstance: () => getPublicStudioClassInstance,
+  getPublicStudioClassInstances: () => getPublicStudioClassInstances,
+  getPublicStudioClassType: () => getPublicStudioClassType,
+  getPublicStudioClassTypes: () => getPublicStudioClassTypes,
+  getPublicStudioInstructor: () => getPublicStudioInstructor,
+  getPublicStudioInstructors: () => getPublicStudioInstructors,
+  getPublicStudioMembershipTier: () => getPublicStudioMembershipTier,
+  getPublicStudioMembershipTiers: () => getPublicStudioMembershipTiers,
+  getPublicStudioSchedule: () => getPublicStudioSchedule,
+  getPublicStudioSchedules: () => getPublicStudioSchedules,
+  getPublicStudioSettings: () => getPublicStudioSettings,
+  normalizePublicLimit: () => normalizePublicLimit,
+  normalizePublicMediaPath: () => normalizePublicMediaPath,
+  projectPublicStudioSettings: () => projectPublicStudioSettings,
+  publicCheckoutProviderEnabled: () => publicCheckoutProviderEnabled,
+  publicOrganizationId: () => publicOrganizationId,
+  publicSkip: () => publicSkip,
+  resolvePublicInstanceWindow: () => resolvePublicInstanceWindow
+});
+function documentToPlainText(value) {
+  if (!value) return null;
+  if (typeof value === "string") return value.trim() || null;
+  if (typeof value !== "object") return null;
+  const document4 = value.document;
+  const text43 = document4?.flatMap((node) => node.children ?? []).map((child) => typeof child.text === "string" ? child.text : "").join(" ").replace(/\s+/g, " ").trim();
+  return text43 || null;
+}
+function normalizePublicLimit(value) {
+  if (!Number.isFinite(value)) return DEFAULT_LIST_LIMIT;
+  return Math.min(Math.max(Math.trunc(value), 1), MAX_LIST_LIMIT);
+}
+function publicSkip(value) {
+  return Number.isInteger(value) && value > 0 ? Math.min(value, 5e3) : 0;
+}
+async function afterCursor(context, listKey, organizationId, after, field) {
+  if (!after) return {};
+  const [anchor] = await publicContext(context).query[listKey].findMany({
+    where: publicTenantWhere(organizationId, { id: { equals: after } }),
+    take: 1,
+    query: field ? `id ${field}` : "id"
+  });
+  if (!anchor) return { id: { equals: "__no_public_cursor__" } };
+  if (!field) return { id: { gt: after } };
+  return { OR: [{ [field]: { gt: anchor[field] } }, { AND: [{ [field]: { equals: anchor[field] } }, { id: { gt: after } }] }] };
+}
+function resolvePublicInstanceWindow(from, to, now = /* @__PURE__ */ new Date()) {
+  const requestedStart = from ? new Date(from) : now;
+  if (Number.isNaN(requestedStart.getTime())) throw new Error("Invalid public class start date.");
+  const start = new Date(Math.max(requestedStart.getTime(), now.getTime()));
+  const maximumEnd = new Date(start.getTime() + MAX_INSTANCE_WINDOW_DAYS * 24 * 60 * 60 * 1e3);
+  const requestedEnd = to ? new Date(to) : new Date(start.getTime() + DEFAULT_INSTANCE_WINDOW_DAYS * 24 * 60 * 60 * 1e3);
+  if (Number.isNaN(requestedEnd.getTime())) throw new Error("Invalid public class end date.");
+  if (requestedEnd < start) throw new Error("Public class end date must be after the start date.");
+  return {
+    from: start.toISOString(),
+    to: new Date(Math.min(requestedEnd.getTime(), maximumEnd.getTime())).toISOString()
+  };
+}
+function normalizePublicMediaPath(value) {
+  if (typeof value !== "string") return null;
+  const path = value.trim();
+  if (!path.startsWith("/images/") || path.startsWith("//") || path.includes("..") || path.includes("?") || path.includes("#") || path.includes("\\")) {
+    return null;
+  }
+  return path;
+}
+function publicText(value, limit) {
+  if (typeof value !== "string") return null;
+  const text43 = value.trim();
+  return text43 ? text43.slice(0, limit) : null;
+}
+function publicInternalHref(value) {
+  return publicCtaHref(value);
+}
+function publicHours(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const serialized = JSON.stringify(value);
+  if (serialized.length > 1e4) return null;
+  return JSON.parse(serialized);
+}
+function publicHeroStats(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 6).flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const valueText = publicText(item.value, 50);
+    const label = publicText(item.label, 100);
+    return valueText && label ? [{ value: valueText, label }] : [];
+  });
+}
+function publicContactTopics(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 12).flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const title = publicText(item.title, 100);
+    const details = Array.isArray(item.details) ? item.details.slice(0, 12).flatMap((detail) => {
+      const text43 = publicText(detail, 300);
+      return text43 ? [text43] : [];
+    }) : [];
+    return title && details.length ? [{ title, details }] : [];
+  });
+}
+function publicFacilityHighlights(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 12).flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const title = publicText(item.title, 200);
+    const description = publicText(item.description, 1e3);
+    const features = Array.isArray(item.features) ? item.features.slice(0, 20).flatMap((feature) => {
+      const text43 = publicText(feature, 100);
+      return text43 ? [text43] : [];
+    }) : [];
+    return title && description ? [{ title, description, features }] : [];
+  });
+}
+function projectPublicStudioSettings(settings, organizationTimeZone) {
+  if (!settings) return null;
+  const name = publicText(settings.name, 200);
+  if (!name) return null;
+  const logoIcon = sanitizeStoreLogoSvg(settings.logoIcon);
+  return {
+    id: String(settings.id),
+    name,
+    tagline: publicText(settings.tagline, 300),
+    logoIcon: logoIcon || null,
+    logoColor: normalizeStudioLogoColor(settings.logoColor),
+    brandHue: normalizeStorefrontHue(settings.brandHue),
+    description: publicText(settings.description, 2e3),
+    address: publicText(settings.address, 500),
+    phone: publicText(settings.phone, 50),
+    email: publicText(settings.email, 320),
+    currencyCode: publicText(settings.currencyCode, 3),
+    dropInPrice: Number.isInteger(settings.dropInPrice) && settings.dropInPrice >= 50 ? settings.dropInPrice : 0,
+    lateCancelHours: Number.isInteger(settings.lateCancelHours) && settings.lateCancelHours > 0 ? Math.min(settings.lateCancelHours, 72) : 0,
+    locale: publicText(settings.locale, 20),
+    timezone: resolveStudioTimeZone(
+      publicText(settings.timezone, 100),
+      publicText(organizationTimeZone, 100)
+    ),
+    countryCode: publicText(settings.countryCode, 2),
+    hours: publicHours(settings.hours),
+    heroEyebrow: publicText(settings.heroEyebrow, 200),
+    heroHeadline: publicText(settings.heroHeadline, 1e3),
+    heroSubheadline: publicText(settings.heroSubheadline, 2e3),
+    heroImagePath: normalizePublicMediaPath(settings.heroImageUrl),
+    heroPrimaryCtaLabel: publicText(settings.heroPrimaryCtaLabel, 100),
+    heroPrimaryCtaHref: publicInternalHref(settings.heroPrimaryCtaHref),
+    heroSecondaryCtaLabel: publicText(settings.heroSecondaryCtaLabel, 100),
+    heroSecondaryCtaHref: publicInternalHref(settings.heroSecondaryCtaHref),
+    promoBanner: publicText(settings.promoBanner, 500),
+    footerTagline: publicText(settings.footerTagline, 500),
+    copyrightName: publicText(settings.copyrightName, 200),
+    facilityHeadline: publicText(settings.facilityHeadline, 300),
+    facilityDescription: publicText(settings.facilityDescription, 2e3),
+    facilityHighlights: publicFacilityHighlights(settings.facilityHighlights),
+    heroStats: publicHeroStats(settings.heroStats),
+    contactTopics: publicContactTopics(settings.contactTopics)
+  };
+}
+function publicContext(context) {
+  return context.sudo();
+}
+async function publicOrganizationId(context) {
+  const configuredId = process.env.STOREFRONT_ORGANIZATION_ID?.trim();
+  const organizations = await publicContext(context).query.Organization.findMany({
+    where: configuredId ? { AND: [{ id: { equals: configuredId } }, { status: { equals: "active" } }] } : { status: { equals: "active" } },
+    take: configuredId ? 1 : 2,
+    orderBy: [{ createdAt: "asc" }],
+    query: "id"
+  });
+  if (!configuredId && organizations.length !== 1) return null;
+  return organizations[0]?.id ?? null;
+}
+async function configuredStorefrontOrganization(context) {
+  const configuredId = process.env.STOREFRONT_ORGANIZATION_ID?.trim();
+  if (configuredId) {
+    const rows = await publicContext(context).query.Organization.findMany({ where: { id: { equals: configuredId } }, take: 1, query: "id status" });
+    return rows[0] ? { id: String(rows[0].id), salesOpen: rows[0].status === "active" } : null;
+  }
+  const active = await publicContext(context).query.Organization.findMany({ where: { status: { equals: "active" } }, take: 2, orderBy: [{ createdAt: "asc" }], query: "id" });
+  if (active.length === 1) return { id: String(active[0].id), salesOpen: true };
+  if (active.length > 1) return null;
+  const all = await publicContext(context).query.Organization.findMany({ take: 2, orderBy: [{ createdAt: "asc" }], query: "id" });
+  return all.length === 1 ? { id: String(all[0].id), salesOpen: false } : null;
+}
+function publicTenantWhere(organizationId, where = {}) {
+  if (!organizationId) return { id: { equals: "__no_public_organization__" } };
+  return {
+    AND: [
+      { organization: { id: { equals: organizationId } } },
+      where
+    ]
+  };
+}
+function publicInstructor(instructor) {
+  if (!instructor) return null;
+  return {
+    id: instructor.id,
+    name: instructor.displayName || instructor.user?.name || "Instructor",
+    bio: documentToPlainText(instructor.bio),
+    specialties: Array.isArray(instructor.specialties) ? instructor.specialties.map(String) : [],
+    // Names of listed and current qualifications only; evidence and verification stay private.
+    certifications: publicQualificationNames(instructor.certifications),
+    imagePath: normalizePublicMediaPath(instructor.photo)
+  };
+}
+function publicSchedule(schedule) {
+  if (!schedule) return null;
+  return {
+    id: schedule.id,
+    name: schedule.name,
+    description: schedule.description || null,
+    dayOfWeek: schedule.dayOfWeek,
+    startTime: schedule.startTime,
+    endTime: schedule.endTime,
+    maxCapacity: schedule.maxCapacity,
+    classType: publicClassType(schedule.classType),
+    instructor: publicInstructor(schedule.instructor)
+  };
+}
+function publicClassType(classType) {
+  if (!classType) return null;
+  return {
+    id: classType.id,
+    name: classType.name,
+    description: documentToPlainText(classType.description),
+    difficulty: classType.difficulty,
+    duration: classType.duration,
+    caloriesBurn: classType.caloriesBurn ?? null,
+    equipmentNeeded: Array.isArray(classType.equipmentNeeded) ? classType.equipmentNeeded.map(String) : []
+  };
+}
+function publicMembershipTier(tier, providerEnabled = false) {
+  if (!tier) return null;
+  return {
+    id: tier.id,
+    name: tier.name,
+    description: documentToPlainText(tier.description),
+    monthlyPrice: tier.monthlyPrice,
+    annualPrice: tier.annualPrice,
+    classCreditsPerMonth: tier.classCreditsPerMonth,
+    guestPasses: tier.guestPasses,
+    personalTrainingSessions: tier.personalTrainingSessions,
+    freezeAllowed: tier.freezeAllowed,
+    contractLength: tier.contractLength,
+    features: Array.isArray(tier.features) ? tier.features.filter((item) => typeof item === "string" && Boolean(item.trim())).slice(0, 12).map((item) => item.slice(0, 120)) : [],
+    // A plan is purchasable only with a mapped price above zero (paid-only service).
+    monthlyCheckoutAvailable: providerEnabled && Boolean(tier.stripeProductId) && Boolean(tier.stripeMonthlyPriceId) && Number(tier.monthlyPrice) > 0,
+    annualCheckoutAvailable: providerEnabled && Boolean(tier.stripeProductId) && Boolean(tier.stripeAnnualPriceId) && Number(tier.annualPrice) > 0
+  };
+}
+function publicClassInstance(instance) {
+  if (!instance) return null;
+  const confirmedBookings = (instance.bookings ?? []).filter(
+    (booking) => booking.status === "confirmed"
+  ).length;
+  const waitlistCount = (instance.bookings ?? []).filter(
+    (booking) => booking.status === "waitlisted"
+  ).length;
+  const maxCapacity = instance.maxCapacity ?? instance.classSchedule?.maxCapacity ?? 0;
+  const instructor = instance.instructor ?? instance.classSchedule?.instructor ?? null;
+  const site = instance.location ?? instance.classSchedule?.location ?? null;
+  return {
+    id: instance.id,
+    startsAt: instance.date,
+    schedule: publicSchedule(instance.classSchedule),
+    instructor: publicInstructor(instructor),
+    location: site ? { id: site.id, name: publicText(site.name, 200) || "Location", address: publicText(site.address, 500) } : null,
+    availability: {
+      maxCapacity,
+      confirmedBookings,
+      waitlistCount,
+      spotsRemaining: Math.max(maxCapacity - confirmedBookings, 0),
+      state: maxCapacity > confirmedBookings ? "open" : "waitlist"
+    }
+  };
+}
+async function getPublicStudioSettings(root, args, context) {
+  const storefront = await configuredStorefrontOrganization(context);
+  const organizationId = storefront?.id ?? null;
+  const [settingsItems, organizations] = await Promise.all([
+    publicContext(context).query.StudioSettings.findMany({
+      where: publicTenantWhere(organizationId),
+      take: 1,
+      query: `
+        id
+        name
+        tagline
+        logoIcon
+        logoColor
+        brandHue
+        description
+        address
+        phone
+        email
+        currencyCode
+        dropInPrice
+        lateCancelHours
+        locale
+        timezone
+        countryCode
+        hours
+        heroEyebrow
+        heroHeadline
+        heroSubheadline
+        heroImageUrl
+        heroPrimaryCtaLabel
+        heroPrimaryCtaHref
+        heroSecondaryCtaLabel
+        heroSecondaryCtaHref
+        promoBanner
+        footerTagline
+        copyrightName
+        facilityHeadline
+        facilityDescription
+        facilityHighlights
+        heroStats
+        contactTopics
+      `
+    }),
+    organizationId ? publicContext(context).query.Organization.findMany({
+      where: { id: { equals: organizationId } },
+      take: 1,
+      query: "timezone"
+    }) : Promise.resolve([])
+  ]);
+  const settings = settingsItems[0];
+  const organization3 = organizations[0];
+  const projected = projectPublicStudioSettings(settings, organization3?.timezone);
+  if (!projected) return null;
+  const participationTerms = await currentParticipationTerms(guardKeystonePrismaResults(context.prisma), organizationId);
+  return { ...projected, participationTerms, salesOpen: Boolean(storefront?.salesOpen) };
+}
+async function getPublicStudioClassTypes(root, args, context) {
+  const organizationId = await publicOrganizationId(context);
+  const filters = [await afterCursor(context, "ClassType", organizationId, args.after, "name")];
+  const q = String(args.q || "").trim().slice(0, 100);
+  if (q) filters.push({ name: containsText(q) });
+  if (args.difficulty && args.difficulty !== "all") filters.push({ difficulty: { equals: String(args.difficulty).slice(0, 50) } });
+  if (args.duration && args.duration !== "all") {
+    const minutes = Number(args.duration);
+    if (Number.isInteger(minutes) && minutes > 0) filters.push({ duration: minutes >= 75 ? { gte: 75 } : { equals: minutes } });
+  }
+  const records = await publicContext(context).query.ClassType.findMany({
+    where: publicTenantWhere(organizationId, { AND: filters }),
+    take: normalizePublicLimit(args.limit),
+    skip: args.after ? 0 : publicSkip(args.skip),
+    orderBy: [{ name: "asc" }, { id: "asc" }],
+    query: `id name description { document } difficulty duration caloriesBurn equipmentNeeded`
+  });
+  return records.map(publicClassType);
+}
+async function getPublicStudioClassType(root, args, context) {
+  const organizationId = await publicOrganizationId(context);
+  const [record2] = await publicContext(context).query.ClassType.findMany({
+    where: publicTenantWhere(organizationId, { id: { equals: args.id } }),
+    take: 1,
+    query: `id name description { document } difficulty duration caloriesBurn equipmentNeeded`
+  });
+  return publicClassType(record2);
+}
+async function getPublicStudioSchedules(root, args, context) {
+  const organizationId = await publicOrganizationId(context);
+  const records = await publicContext(context).query.ClassSchedule.findMany({
+    where: publicTenantWhere(organizationId, {
+      isActive: { equals: true },
+      ...args.dayOfWeek ? { dayOfWeek: { equals: args.dayOfWeek } } : {},
+      ...args.instructorId ? { instructor: { id: { equals: args.instructorId } } } : {}
+    }),
+    take: normalizePublicLimit(args.limit),
+    orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
+    query: `
+      id name description dayOfWeek startTime endTime maxCapacity
+      classType { id name description { document } difficulty duration caloriesBurn equipmentNeeded }
+      instructor { id displayName bio { document } specialties certifications photo }
+    `
+  });
+  return records.map(publicSchedule);
+}
+async function getPublicStudioSchedule(root, args, context) {
+  const organizationId = await publicOrganizationId(context);
+  const [record2] = await publicContext(context).query.ClassSchedule.findMany({
+    where: publicTenantWhere(organizationId, { id: { equals: args.id } }),
+    take: 1,
+    query: `
+      id name description dayOfWeek startTime endTime maxCapacity isActive
+      classType { id name description { document } difficulty duration caloriesBurn equipmentNeeded }
+      instructor { id displayName bio { document } specialties certifications photo }
+    `
+  });
+  return record2?.isActive ? publicSchedule(record2) : null;
+}
+async function getPublicStudioClassInstances(root, args, context) {
+  const organizationId = await publicOrganizationId(context);
+  const window = resolvePublicInstanceWindow(args.from, args.to);
+  const skip = Number.isInteger(args.skip) && args.skip > 0 ? Math.min(args.skip, 5e3) : 0;
+  const filters = [];
+  if (args.instructorId) filters.push({ OR: [
+    { instructor: { id: { equals: args.instructorId } } },
+    { AND: [{ instructor: null }, { classSchedule: { instructor: { id: { equals: args.instructorId } } } }] }
+  ] });
+  if (args.locationId) filters.push({ OR: [
+    { location: { id: { equals: args.locationId } } },
+    { AND: [{ location: null }, { classSchedule: { location: { id: { equals: args.locationId } } } }] }
+  ] });
+  for (const term of String(args.search || "").trim().toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6)) {
+    const text43 = containsText(term.slice(0, 60));
+    const levels = CLASS_LEVELS.filter((level) => level.startsWith(term));
+    filters.push({ OR: [
+      { classSchedule: { name: text43 } },
+      { classSchedule: { classType: { name: text43 } } },
+      ...levels.length ? [{ classSchedule: { classType: { difficulty: { in: levels } } } }] : [],
+      { instructor: { user: { name: text43 } } },
+      { AND: [{ instructor: null }, { classSchedule: { instructor: { user: { name: text43 } } } }] }
+    ] });
+  }
+  const records = await publicContext(context).query.ClassInstance.findMany({
+    where: publicTenantWhere(organizationId, {
+      date: { gte: window.from, lte: window.to },
+      isCancelled: { equals: false },
+      classSchedule: {
+        isActive: { equals: true },
+        ...args.scheduleId ? { id: { equals: args.scheduleId } } : {},
+        ...args.classTypeId ? { classType: { id: { equals: args.classTypeId } } } : {}
+      },
+      ...filters.length ? { AND: filters } : {}
+    }),
+    take: normalizePublicLimit(args.limit),
+    skip,
+    orderBy: [{ date: "asc" }, { id: "asc" }],
+    query: `
+      id date maxCapacity
+      location { id name address isActive }
+      instructor { id displayName bio { document } specialties certifications photo }
+      classSchedule {
+        id name description dayOfWeek startTime endTime maxCapacity
+        location { id name address isActive }
+        classType { id name description { document } difficulty duration caloriesBurn equipmentNeeded }
+        instructor { id displayName bio { document } specialties certifications photo }
+      }
+      bookings { id status }
+    `
+  });
+  return records.map(publicClassInstance);
+}
+async function getPublicStudioClassInstance(root, args, context) {
+  const organizationId = await publicOrganizationId(context);
+  const [record2] = await publicContext(context).query.ClassInstance.findMany({
+    where: publicTenantWhere(organizationId, { id: { equals: args.id } }),
+    take: 1,
+    query: `
+      id date maxCapacity isCancelled
+      location { id name address isActive }
+      instructor { id displayName bio { document } specialties certifications photo }
+      classSchedule {
+        id name description dayOfWeek startTime endTime maxCapacity isActive
+        location { id name address isActive }
+        classType { id name description { document } difficulty duration caloriesBurn equipmentNeeded }
+        instructor { id displayName bio { document } specialties certifications photo }
+      }
+      bookings { id status }
+    `
+  });
+  if (!record2 || record2.isCancelled || !record2.classSchedule?.isActive || new Date(record2.date).getTime() < Date.now()) {
+    return null;
+  }
+  return publicClassInstance(record2);
+}
+async function getPublicStudioInstructors(root, args, context) {
+  const organizationId = await publicOrganizationId(context);
+  const records = await publicContext(context).query.Instructor.findMany({
+    where: publicTenantWhere(organizationId, { AND: [{ isActive: { equals: true } }, await afterCursor(context, "Instructor", organizationId, args.after, null)] }),
+    take: normalizePublicLimit(args.limit),
+    skip: args.after ? 0 : publicSkip(args.skip),
+    orderBy: [{ id: "asc" }],
+    query: `id displayName bio { document } specialties certifications photo`
+  });
+  return records.map(publicInstructor).filter((instructor) => Boolean(instructor));
+}
+async function getPublicStudioInstructor(root, args, context) {
+  const organizationId = await publicOrganizationId(context);
+  const [record2] = await publicContext(context).query.Instructor.findMany({
+    where: publicTenantWhere(organizationId, { id: { equals: args.id } }),
+    take: 1,
+    query: `id displayName bio { document } specialties certifications photo isActive`
+  });
+  return record2?.isActive ? publicInstructor(record2) : null;
+}
+async function publicCheckoutProviderEnabled(context, organizationId) {
+  if (!organizationId) return false;
+  const providers = await publicContext(context).query.PaymentProvider.findMany({
+    where: publicTenantWhere(organizationId, {
+      AND: [{ code: { equals: "pp_stripe" } }, installedPaymentProviderWhere()]
+    }),
+    take: 1,
+    query: "id adapterKey"
+  });
+  const provider = providers[0];
+  if (!provider) return false;
+  return provider.adapterKey !== "stripe" || newPaymentChargesEnabled();
+}
+async function getPublicStudioMembershipTiers(root, args, context) {
+  const organizationId = await publicOrganizationId(context);
+  const providerEnabled = await publicCheckoutProviderEnabled(context, organizationId);
+  const mapped = { not: { equals: "" } };
+  const purchasable = providerEnabled ? [{ stripeProductId: mapped }, { OR: [
+    { AND: [{ stripeMonthlyPriceId: mapped }, { monthlyPrice: { gt: 0 } }] },
+    { AND: [{ stripeAnnualPriceId: mapped }, { annualPrice: { gt: 0 } }] }
+  ] }] : [];
+  const records = await publicContext(context).query.MembershipTier.findMany({
+    where: publicTenantWhere(organizationId, { AND: [...purchasable, await afterCursor(context, "MembershipTier", organizationId, args.after, "monthlyPrice")] }),
+    take: normalizePublicLimit(args.limit),
+    skip: args.after ? 0 : publicSkip(args.skip),
+    orderBy: [{ monthlyPrice: "asc" }, { id: "asc" }],
+    query: `
+      id name description { document } monthlyPrice annualPrice classCreditsPerMonth
+      guestPasses personalTrainingSessions freezeAllowed contractLength
+      stripeMonthlyPriceId stripeAnnualPriceId stripeProductId features
+    `
+  });
+  return records.map((record2) => publicMembershipTier(record2, providerEnabled)).filter((tier) => !providerEnabled || tier.monthlyCheckoutAvailable || tier.annualCheckoutAvailable);
+}
+async function getPublicStudioMembershipTier(root, args, context) {
+  const organizationId = await publicOrganizationId(context);
+  const providerEnabled = await publicCheckoutProviderEnabled(context, organizationId);
+  const [record2] = await publicContext(context).query.MembershipTier.findMany({
+    where: publicTenantWhere(organizationId, { id: { equals: args.id } }),
+    take: 1,
+    query: `
+      id name description { document } monthlyPrice annualPrice classCreditsPerMonth
+      guestPasses personalTrainingSessions freezeAllowed contractLength
+      stripeMonthlyPriceId stripeAnnualPriceId stripeProductId features
+    `
+  });
+  const tier = publicMembershipTier(record2, providerEnabled);
+  return tier && (!providerEnabled || tier.monthlyCheckoutAvailable || tier.annualCheckoutAvailable) ? tier : null;
+}
+var DEFAULT_INSTANCE_WINDOW_DAYS, MAX_INSTANCE_WINDOW_DAYS, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, PUBLIC_STUDIO_QUERY_NAMES, containsText, CLASS_LEVELS;
+var init_publicStudio = __esm({
+  "features/keystone/queries/publicStudio.ts"() {
+    "use strict";
+    init_timezone();
+    init_studioLogo();
+    init_storefront_branding();
+    init_studio_settings_content();
+    init_trainerQualifications();
+    init_stripe_environment_provider();
+    init_participation_terms();
+    init_prisma_result();
+    DEFAULT_INSTANCE_WINDOW_DAYS = 14;
+    MAX_INSTANCE_WINDOW_DAYS = 90;
+    DEFAULT_LIST_LIMIT = 50;
+    MAX_LIST_LIMIT = 100;
+    PUBLIC_STUDIO_QUERY_NAMES = [
+      "publicStudioSettings",
+      "publicStudioClassTypes",
+      "publicStudioClassType",
+      "publicStudioSchedules",
+      "publicStudioSchedule",
+      "publicStudioClassInstances",
+      "publicStudioClassInstance",
+      "publicStudioInstructors",
+      "publicStudioInstructor",
+      "publicStudioMembershipTiers",
+      "publicStudioMembershipTier"
+    ];
+    containsText = (value) => ({ contains: value, mode: "insensitive" });
+    CLASS_LEVELS = ["beginner", "intermediate", "advanced", "all-levels"];
+  }
+});
+
+// features/keystone/mutations/studioLifecycle.ts
+function assertFacilityStaff(actor2) {
+  if (actor2.canManageAllRecords || actor2.canManageCheckIns || actor2.canManageFacilities || actor2.trustedKiosk) return;
+  throw new Error("Facility check-in management permission required");
+}
+function assertActorOrganization(actor2, organizationId) {
+  if (!organizationId || !actor2.organizationId || actor2.organizationId !== organizationId) {
+    throw new Error("Actor is not in the record organization");
+  }
+}
+function assertOwnerOrOperator(actor2, ownerUserId) {
+  if (actor2.canManageAllRecords || actor2.trustedKiosk || actor2.userId === ownerUserId) return;
+  throw new Error("You cannot manage another member's records");
+}
+async function lateCancelWindowHours(tx, organizationId) {
+  const settings = await tx.studioSettings.findFirst({ where: { organizationId }, orderBy: [{ createdAt: "asc" }], select: { lateCancelHours: true } });
+  const hours = Number(settings?.lateCancelHours ?? 0);
+  return Number.isInteger(hours) && hours > 0 ? Math.min(hours, 72) : 0;
+}
+function isLateCancellation(classStart, now, windowHours) {
+  return windowHours > 0 && classStart.getTime() - now.getTime() < windowHours * 36e5;
+}
+async function cancelCapacityControlledBooking(prisma, input) {
+  prisma = guardKeystonePrismaResults(prisma);
+  const past = input.pastBookingReason !== void 0;
+  const reason = (input.pastBookingReason ?? "").trim();
+  if (past) {
+    if (reason.length < 3 || reason.length > 1e3) throw new Error("A reason between 3 and 1000 characters is required");
+    if (!input.actor.canManageAllRecords) throw new Error("Booking management permission required");
+  }
+  const result = await prisma.$transaction(async (transaction) => {
+    await lockParticipationPolicy(transaction, input.actor.organizationId);
+    const identity = await transaction.classBooking.findFirst({
+      where: { id: input.bookingId, organizationId: input.actor.organizationId },
+      select: { classInstanceId: true, memberId: true }
+    });
+    if (!identity?.classInstanceId || !identity.memberId) throw new Error("Booking not found");
+    await lockTransactionKey(transaction, `class-instance:${identity.classInstanceId}`);
+    await lockTransactionKey(transaction, `member:${identity.memberId}`);
+    const booking = await transaction.classBooking.findFirst({
+      where: { id: input.bookingId, organizationId: input.actor.organizationId },
+      include: {
+        classInstance: { select: { id: true, date: true, organizationId: true, isCancelled: true } },
+        member: {
+          include: {
+            user: {
+              include: {
+                membership: {
+                  include: { tier: { select: { classCreditsPerMonth: true } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+    if (!booking?.member?.user?.id || !booking.classInstance) {
+      throw new Error("Booking owner or class instance is missing");
+    }
+    assertActorOrganization(input.actor, booking.classInstance.organizationId);
+    assertActorOrganization(input.actor, booking.member.organizationId);
+    assertOwnerOrOperator(input.actor, booking.member.user.id);
+    if (booking.status === "cancelled" || booking.status === "late_cancelled") {
+      return {
+        bookingId: booking.id,
+        classInstanceId: booking.classInstance.id,
+        cancelled: false,
+        releasedConfirmedSpot: false,
+        promotion: { promoted: false, message: "No confirmed spot was released" }
+      };
+    }
+    if (!["confirmed", "waitlisted"].includes(booking.status)) {
+      throw new Error(`Booking cannot be cancelled from ${booking.status}`);
+    }
+    if (past) {
+      if (booking.status !== "confirmed") throw new Error("Only a confirmed booking can be cancelled after the class");
+      if (booking.classInstance.isCancelled) throw new Error("This class was cancelled; its bookings are already closed");
+      if (booking.classInstance.date.getTime() > Date.now()) throw new Error("This class hasn't started; use the normal cancel");
+      const marked = await transaction.attendanceRecord.findFirst({ where: { bookingId: booking.id, organizationId: input.actor.organizationId }, select: { id: true } });
+      if (marked) throw new Error("This booking has an attendance mark; undo the check-in first");
+    } else if (booking.classInstance.date.getTime() <= Date.now()) {
+      throw new Error("A class booking cannot be cancelled after the class starts");
+    }
+    const late = !past && booking.status === "confirmed" && !input.actor.canManageAllRecords && isLateCancellation(booking.classInstance.date, /* @__PURE__ */ new Date(), await lateCancelWindowHours(transaction, input.actor.organizationId));
+    await transaction.classBooking.update({
+      where: { id: booking.id },
+      data: {
+        status: late ? "late_cancelled" : "cancelled",
+        activeBookingKey: null,
+        activeSpotKey: null,
+        cancelledAt: /* @__PURE__ */ new Date(),
+        waitlistPosition: null,
+        lateCancelled: late,
+        history: appendHistory(booking.history, historyEntry(booking.status === "waitlisted" ? "left" : late ? "late_cancelled" : "cancelled", { by: input.actor.userId }))
+      }
+    });
+    if (booking.status === "confirmed" && !late && !isDropInBooking(booking)) await restoreBookingCredit(transaction, booking.id);
+    await enqueueOperationalNotice(transaction, {
+      organizationId: input.actor.organizationId,
+      memberId: booking.memberId,
+      key: `booking:${booking.id}:cancelled`,
+      kind: "cancellation",
+      message: late ? "Your class booking has been cancelled. It was inside the club's late-cancel window, so the class credit or drop-in fee isn't returned." : "Your class booking has been cancelled. Any restorable credit returns to its original service month.",
+      ...past ? { history: [{ action: "past_booking_cancelled", at: (/* @__PURE__ */ new Date()).toISOString(), actorId: input.actor.userId, note: reason }] } : {}
+    });
+    const releasedConfirmedSpot = booking.status === "confirmed";
+    const promotion = releasedConfirmedSpot && !past ? await promoteCapacityControlledWaitlistBookingInTransaction(
+      transaction,
+      booking.classInstance.id,
+      input.actor.organizationId,
+      true,
+      { preferredSpotId: booking.spotId ?? null }
+    ) : { promoted: false, message: "No confirmed spot was released" };
+    return {
+      bookingId: booking.id,
+      classInstanceId: booking.classInstance.id,
+      cancelled: true,
+      lateCancelled: late,
+      releasedConfirmedSpot,
+      promotion
+    };
+  });
+  return result;
+}
+async function cancelCapacityControlledClassInstance(prisma, input) {
+  prisma = guardKeystonePrismaResults(prisma);
+  const reason = input.reason.trim();
+  if (reason.length < 3 || reason.length > 1e3) {
+    throw new Error("Class cancellation reason must be between 3 and 1000 characters");
+  }
+  if (!input.actor.canManageAllRecords) {
+    throw new Error("Class cancellation management permission required");
+  }
+  return prisma.$transaction(async (transaction) => {
+    await lockParticipationPolicy(transaction, input.actor.organizationId);
+    await lockTransactionKey(transaction, `class-instance:${input.classInstanceId}`);
+    const loadClassInstance = () => transaction.classInstance.findFirst({
+      where: { id: input.classInstanceId, organizationId: input.actor.organizationId },
+      include: {
+        bookings: {
+          where: { status: { in: ["confirmed", "waitlisted"] } },
+          include: {
+            member: {
+              include: {
+                user: {
+                  include: {
+                    membership: {
+                      include: { tier: { select: { classCreditsPerMonth: true } } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+    let classInstance = await loadClassInstance();
+    if (!classInstance) throw new Error("Class instance not found");
+    assertActorOrganization(input.actor, classInstance.organizationId);
+    if (classInstance.date.getTime() <= Date.now()) {
+      throw new Error("A class instance cannot be cancelled after it starts");
+    }
+    if (classInstance.isCancelled) {
+      return {
+        classInstanceId: classInstance.id,
+        cancelledBookings: 0,
+        refundedCredits: 0,
+        reused: true
+      };
+    }
+    const memberIds = [...new Set(
+      classInstance.bookings.map((booking) => booking.memberId).filter((id) => typeof id === "string" && id.length > 0)
+    )].sort();
+    for (const memberId of memberIds) {
+      await lockTransactionKey(transaction, `member:${memberId}`);
+    }
+    classInstance = await loadClassInstance();
+    if (!classInstance || classInstance.isCancelled) throw new Error("Class instance changed during cancellation");
+    let refundedCredits = 0;
+    for (const booking of classInstance.bookings) {
+      if (booking.status !== "confirmed" || isDropInBooking(booking)) continue;
+      if (await restoreBookingCredit(transaction, booking.id)) refundedCredits += 1;
+    }
+    for (const booking of classInstance.bookings) await enqueueOperationalNotice(transaction, {
+      organizationId: input.actor.organizationId,
+      memberId: booking.memberId,
+      key: `booking:${booking.id}:class-cancelled`,
+      kind: "cancellation",
+      message: `Your class has been cancelled: ${reason}`
+    });
+    const cancelledAt = /* @__PURE__ */ new Date();
+    await transaction.classBooking.updateMany({
+      where: {
+        classInstanceId: classInstance.id,
+        status: { in: ["confirmed", "waitlisted"] }
+      },
+      data: {
+        status: "cancelled",
+        activeBookingKey: null,
+        activeSpotKey: null,
+        cancelledAt,
+        waitlistPosition: null
+      }
+    });
+    await transaction.classInstance.update({
+      where: { id: classInstance.id },
+      data: { isCancelled: true, cancellationReason: reason }
+    });
+    return {
+      classInstanceId: classInstance.id,
+      cancelledBookings: classInstance.bookings.length,
+      refundedCredits,
+      reused: false
+    };
+  });
+}
+async function loadStaffAttendanceBooking(transaction, bookingId, actor2) {
+  await lockTransactionKey(transaction, `attendance:${bookingId}`);
+  const booking = await transaction.classBooking.findFirst({
+    where: { id: bookingId, organizationId: actor2.organizationId },
+    include: {
+      member: { include: { user: { include: { membership: true } } } },
+      classInstance: {
+        include: {
+          instructor: { include: { user: { select: { id: true } } } },
+          classSchedule: {
+            include: { instructor: { include: { user: { select: { id: true } } } } }
+          }
+        }
+      }
+    }
+  });
+  if (!booking?.memberId || !booking.classInstance?.classScheduleId) {
+    throw new Error("Attendance booking is missing its member or schedule");
+  }
+  assertActorOrganization(actor2, booking.member.organizationId);
+  assertActorOrganization(actor2, booking.classInstance.organizationId);
+  if (booking.status !== "confirmed") {
+    throw new Error("Attendance can only be marked for a confirmed booking");
+  }
+  if (booking.classInstance.isCancelled) throw new Error("Attendance cannot be marked for a cancelled class");
+  if (booking.classInstance.date.getTime() > Date.now()) {
+    throw new Error("Attendance cannot be marked before the class starts");
+  }
+  const effectiveInstructor2 = booking.classInstance.instructor ?? booking.classInstance.classSchedule?.instructor ?? null;
+  const assignedToActor = Boolean(effectiveInstructor2?.isActive && effectiveInstructor2?.user?.id === actor2.userId);
+  if (!actor2.canManageAllRecords && !(actor2.isInstructor && assignedToActor)) {
+    throw new Error("Attendance management permission required");
+  }
+  return booking;
+}
+async function markCapacityControlledAttendance(prisma, input) {
+  prisma = guardKeystonePrismaResults(prisma);
+  const outcome = normalizeAttendanceOutcome(input.outcome);
+  return prisma.$transaction(async (transaction) => {
+    await lockParticipationPolicy(transaction, input.actor.organizationId);
+    const booking = await loadStaffAttendanceBooking(transaction, input.bookingId, input.actor);
+    if (outcome !== "no-show") {
+      await lockTransactionKey(transaction, `member:${booking.memberId}`);
+      const currentMember = await transaction.member.findFirst({ where: { id: booking.memberId, organizationId: input.actor.organizationId }, include: { user: { include: { membership: true } } } });
+      assertInstructorQualifications(booking.classInstance.instructor ?? booking.classInstance.classSchedule?.instructor ?? {}, /* @__PURE__ */ new Date());
+      if (currentMember?.status !== "active") throw new Error("Member account is not active");
+      if (!isDropInBooking(booking)) try {
+        assertMembershipServiceEligibility(currentMember.user?.membership, booking.classInstance.date);
+      } catch (error) {
+        const debit = await transaction.membershipCreditEntry.findUnique({ where: { key: `${booking.id}:debit` }, include: { grant: true } });
+        const membership = currentMember.user?.membership;
+        if (membership?.status !== "active" || !(error instanceof Error) || error.message !== "Service is outside the paid membership period" || debit?.grant?.membershipId !== membership.id || booking.classInstance.date < debit.grant.periodStart || booking.classInstance.date >= debit.grant.periodEnd) throw error;
+      }
+      await assertParticipationAllowed(transaction, input.actor.organizationId, booking.memberId, booking.classInstance.date, booking.classInstance.locationId);
+    }
+    const requestedMinutes = Number(input.minutesLate ?? 0);
+    const minutesLate = outcome === "late" ? Math.min(Math.max(Number.isFinite(requestedMinutes) ? Math.floor(requestedMinutes) : 5, 1), 180) : null;
+    const data = {
+      organizationId: booking.member.organizationId,
+      bookingId: booking.id,
+      classScheduleId: booking.classInstance.classScheduleId,
+      memberId: booking.memberId,
+      markedById: input.actor.userId,
+      markedAt: /* @__PURE__ */ new Date(),
+      attended: outcome !== "no-show",
+      lateArrival: outcome === "late",
+      minutesLate,
+      noShowReason: outcome === "no-show" ? input.notes?.trim() || "Marked from roster" : ""
+    };
+    const existing = await transaction.attendanceRecord.findFirst({
+      where: { bookingId: booking.id, organizationId: input.actor.organizationId },
+      orderBy: { createdAt: "asc" },
+      select: { id: true }
+    });
+    const record2 = existing ? await transaction.attendanceRecord.update({ where: { id: existing.id }, data }) : await transaction.attendanceRecord.create({ data });
+    return { id: record2.id, outcome };
+  });
+}
+async function undoCapacityControlledAttendance(prisma, input) {
+  prisma = guardKeystonePrismaResults(prisma);
+  return prisma.$transaction(async (transaction) => {
+    await lockParticipationPolicy(transaction, input.actor.organizationId);
+    const booking = await loadStaffAttendanceBooking(transaction, input.bookingId, input.actor);
+    const removed = await transaction.attendanceRecord.deleteMany({
+      where: { bookingId: booking.id, organizationId: input.actor.organizationId }
+    });
+    return { bookingId: booking.id, removed: removed.count };
+  });
+}
+async function recordCapacityControlledMemberCheckIn(prisma, input) {
+  prisma = guardKeystonePrismaResults(prisma);
+  assertFacilityStaff(input.actor);
+  const method = normalizeCheckInMethod(input.method);
+  return prisma.$transaction(async (transaction) => {
+    await lockParticipationPolicy(transaction, input.actor.organizationId);
+    await lockTransactionKey(transaction, `check-in:${input.memberId}`);
+    await lockTransactionKey(transaction, `member:${input.memberId}`);
+    const member = await transaction.member.findFirst({
+      where: { id: input.memberId, organizationId: input.actor.organizationId },
+      include: {
+        user: { include: { membership: true } },
+        subscriptions: { where: { status: "active" }, select: { id: true } }
+      }
+    });
+    if (!member?.user?.id) throw new Error("Member not found");
+    assertActorOrganization(input.actor, member.organizationId);
+    if (member.status !== "active") throw new Error(`Member status is ${member.status}`);
+    if (member.user.membership?.id) await assertNoPendingMembershipFreeze(transaction, input.actor.organizationId, member.user.membership.id);
+    assertMembershipServiceEligibility(member.user.membership, /* @__PURE__ */ new Date());
+    await assertParticipationAllowed(transaction, input.actor.organizationId, member.id, /* @__PURE__ */ new Date(), input.locationId);
+    if (input.locationId) {
+      const location2 = await transaction.location.findFirst({
+        where: { id: input.locationId, organizationId: input.actor.organizationId },
+        select: { isActive: true, organizationId: true }
+      });
+      if (!location2?.isActive) throw new Error("Check-in location is not active");
+      if (location2.organizationId !== member.organizationId) throw new Error("Check-in location is not in the member's organization");
+    }
+    const existing = await transaction.checkIn.findFirst({
+      where: {
+        memberId: member.id,
+        organizationId: input.actor.organizationId,
+        isGuest: false,
+        checkOutTime: null
+      },
+      orderBy: { checkInTime: "desc" }
+    });
+    if (existing) return { checkIn: existing, reused: true };
+    if (input.actor.organizationId !== member.organizationId) throw new Error("Check-in actor organization is invalid");
+    const checkIn = await transaction.checkIn.create({
+      data: {
+        organizationId: member.organizationId,
+        memberId: member.id,
+        openCheckInKey: "open",
+        locationId: input.locationId || null,
+        method,
+        membershipValidated: true,
+        validationNotes: "Validated by controlled check-in transition"
+      }
+    });
+    return { checkIn, reused: false };
+  });
+}
+async function recordControlledGuestCheckIn(prisma, input) {
+  prisma = guardKeystonePrismaResults(prisma);
+  const guestName = input.guestName.trim();
+  const idempotencyKey = input.idempotencyKey.trim();
+  if (!guestName) throw new Error("Guest name is required");
+  if (idempotencyKey.length < 12 || idempotencyKey.length > 200) throw new Error("Guest check-in idempotency key is required");
+  const host = input.hostMemberId ? await prisma.member.findFirst({
+    where: { id: input.hostMemberId, organizationId: input.organizationId },
+    select: { organizationId: true }
+  }) : null;
+  if (input.hostMemberId && !host) throw new Error("Host member not found");
+  const organizationId = input.organizationId;
+  if (!organizationId || host && host.organizationId !== organizationId) {
+    throw new Error("Guest check-in organization is invalid");
+  }
+  return prisma.$transaction(async (transaction) => {
+    await lockParticipationPolicy(transaction, input.organizationId);
+    await assertParticipationAllowed(transaction, organizationId, null, /* @__PURE__ */ new Date());
+    await lockTransactionKey(transaction, `guest-check-in:${organizationId}:${idempotencyKey}`);
+    const marker = `[request:${idempotencyKey}]`;
+    const existing = await transaction.checkIn.findFirst({
+      where: { organizationId, isGuest: true, validationNotes: { contains: marker } },
+      orderBy: { createdAt: "asc" }
+    });
+    if (existing) return existing;
+    return transaction.checkIn.create({
+      data: {
+        organizationId,
+        memberId: input.hostMemberId || null,
+        isGuest: true,
+        guestName,
+        method: "manual",
+        membershipValidated: false,
+        validationNotes: `${marker}${input.phone?.trim() ? ` Guest phone: ${input.phone.trim()}.` : ""}${input.hostMemberId ? " Invited by member." : ""}`
+      }
+    });
+  });
+}
+async function checkOutControlledMember(prisma, input) {
+  prisma = guardKeystonePrismaResults(prisma);
+  assertFacilityStaff(input.actor);
+  return prisma.$transaction(async (transaction) => {
+    await lockParticipationPolicy(transaction, input.actor.organizationId);
+    await lockTransactionKey(transaction, `check-out:${input.checkInId}`);
+    const checkIn = await transaction.checkIn.findFirst({
+      where: { id: input.checkInId, organizationId: input.actor.organizationId },
+      include: { member: { include: { user: { select: { id: true } } } } }
+    });
+    if (!checkIn) throw new Error("Check-in not found");
+    assertActorOrganization(input.actor, checkIn.organizationId);
+    if (checkIn.checkOutTime) return { checkIn, reused: true };
+    const updated = await transaction.checkIn.update({
+      where: { id: checkIn.id },
+      data: { checkOutTime: /* @__PURE__ */ new Date(), openCheckInKey: null }
+    });
+    return { checkIn: updated, reused: false };
+  });
+}
+async function releaseFutureBookingsForEndedMembership(prisma, input) {
+  prisma = guardKeystonePrismaResults(prisma);
+  const member = await prisma.member.findFirst({
+    where: { organizationId: input.organizationId, userId: input.userId },
+    select: { id: true }
+  });
+  if (!member) return { released: 0, failed: 0 };
+  const bookings = await prisma.classBooking.findMany({
+    where: {
+      organizationId: input.organizationId,
+      memberId: member.id,
+      status: { in: ["confirmed", "waitlisted"] },
+      classInstance: { date: { gt: /* @__PURE__ */ new Date() }, isCancelled: false }
+    },
+    select: { id: true },
+    orderBy: { bookedAt: "asc" }
+  });
+  const actor2 = { userId: input.actorUserId, organizationId: input.organizationId, canManageAllRecords: true };
+  let released = 0;
+  let failed = 0;
+  for (const booking of bookings) {
+    try {
+      const result = await cancelCapacityControlledBooking(prisma, { bookingId: booking.id, actor: actor2 });
+      if (result.cancelled) released += 1;
+    } catch (error) {
+      failed += 1;
+      console.error("Releasing a booking for an ended membership failed", { bookingId: booking.id, name: error instanceof Error ? error.name : "UnknownError" });
+    }
+  }
+  return { released, failed };
+}
+var init_studioLifecycle = __esm({
+  "features/keystone/mutations/studioLifecycle.ts"() {
+    "use strict";
+    init_spots();
+    init_trainerQualifications();
+    init_membership_credits();
+    init_operational_policy();
+    init_operational_notices();
+    init_prisma_result();
+    init_classCapacity();
+    init_studioLifecyclePolicy();
+  }
+});
+
+// features/keystone/mutations/rooms.ts
+var rooms_exports = {};
+__export(rooms_exports, {
+  bookClassWithSpot: () => bookClassWithSpot,
+  changeBookingSpot: () => changeBookingSpot,
+  classAvailability: () => classAvailability,
+  classRoomId: () => classRoomId,
+  fillReleasedSeats: () => fillReleasedSeats,
+  joinWaitlist: () => joinWaitlist,
+  leaveWaitlist: () => leaveWaitlist,
+  promoteWaitlistBooking: () => promoteWaitlistBooking,
+  roomTypeDefs: () => roomTypeDefs,
+  roomsWorkspace: () => roomsWorkspace,
+  saveRoomLayout: () => saveRoomLayout,
+  setSpotOutOfService: () => setSpotOutOfService
+});
+async function classAvailability(_root, args, context) {
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const session = context.session;
+  let organizationId = session?.data?.organization?.id ?? null;
+  if (!organizationId) {
+    const { configuredStorefrontOrganization: configuredStorefrontOrganization2 } = await Promise.resolve().then(() => (init_publicStudio(), publicStudio_exports));
+    organizationId = (await configuredStorefrontOrganization2(context))?.id ?? null;
+  }
+  if (!organizationId) throw new Error("Class not found");
+  const instance = await prisma.classInstance.findFirst({ where: { id: args.classInstanceId, organizationId }, include: INSTANCE_INCLUDE });
+  if (!instance) throw new Error("Class not found");
+  const room = instance.resource ?? instance.classSchedule?.resource ?? null;
+  const { mode, capacity, spots } = await classCapacity(prisma, instance, effectiveSessionCapacity(instance));
+  const { taken, confirmed } = await takenSpots(prisma, instance);
+  const waitlistCount = await prisma.classBooking.count({ where: { classInstanceId: instance.id, organizationId, status: "waitlisted" } });
+  const allSpots = room ? await prisma.spot.findMany({ where: { roomId: room.id, organizationId, retiredAt: null }, orderBy: [{ number: "asc" }], take: 500 }) : [];
+  const bookable = new Set(spots.map((spot) => spot.id));
+  let mine = null;
+  if (session?.itemId) {
+    const member = await prisma.member.findFirst({ where: { organizationId, userId: session.itemId }, select: { id: true } });
+    if (member) {
+      const own = await prisma.classBooking.findFirst({ where: { classInstanceId: instance.id, organizationId, memberId: member.id, status: { in: ["confirmed", "waitlisted"] } }, select: { id: true, spotId: true, status: true, waitlistPosition: true } });
+      if (own) mine = { bookingId: own.id, spotId: own.spotId, status: own.status, waitlistPosition: own.waitlistPosition };
+    }
+  }
+  const started = instance.date.getTime() <= Date.now();
+  const open = !instance.isCancelled && !started && instance.classSchedule?.isActive !== false;
+  return {
+    classInstanceId: instance.id,
+    startsAt: instance.date.toISOString(),
+    capacityMode: mode,
+    capacity,
+    confirmed,
+    spotsRemaining: Math.max(capacity - confirmed, 0),
+    waitlistCount,
+    state: !open ? instance.isCancelled ? "cancelled" : "closed" : confirmed >= capacity ? "full" : "open",
+    room: room ? { id: room.id, name: room.name, layout: normalizeLayout(room.layout) } : null,
+    spots: allSpots.map((spot) => ({
+      id: spot.id,
+      number: spot.number,
+      label: spot.label,
+      apparatus: spot.apparatus,
+      x: spot.x,
+      y: spot.y,
+      state: !bookable.has(spot.id) ? "out_of_service" : taken.has(spot.id) ? mine?.spotId === spot.id ? "yours" : "taken" : "free"
+    })),
+    mine
+  };
+}
+function normalizeLayout(layout) {
+  const width = Number.isInteger(layout?.width) ? Math.min(Math.max(layout.width, 1), 40) : 8;
+  const height = Number.isInteger(layout?.height) ? Math.min(Math.max(layout.height, 1), 40) : 4;
+  const point = (value) => value && Number.isInteger(value.x) && Number.isInteger(value.y) ? { x: value.x, y: value.y } : null;
+  return { width, height, instructor: point(layout?.instructor), door: point(layout?.door) };
+}
+async function memberForActor(tx, organizationId, userId) {
+  const member = await tx.member.findFirst({ where: { organizationId, userId }, select: { id: true } });
+  if (!member) throw new Error("Sign in as a client to book");
+  return member.id;
+}
+async function bookClassWithSpot(_root, args, context) {
+  const actor2 = await currentRoleActor(context);
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const memberId = args.memberId || await memberForActor(prisma, actor2.organizationId, actor2.userId);
+  if (args.idempotencyKey) {
+    const replay2 = await prisma.classBooking.findFirst({ where: { organizationId: actor2.organizationId, classInstanceId: args.classInstanceId, memberId, status: { in: ["confirmed", "waitlisted"] } }, include: { spot: true } });
+    if (replay2 && Array.isArray(replay2.history) && replay2.history.some((entry) => entry?.idempotencyKey === args.idempotencyKey)) {
+      return bookingResult(prisma, replay2.id, null);
+    }
+  }
+  const result = await createCapacityControlledBooking(context.prisma, {
+    classInstanceId: args.classInstanceId,
+    memberId,
+    spotId: args.spotId ?? null,
+    actorUserId: actor2.userId,
+    actorOrganizationId: actor2.organizationId,
+    actorCanManageAllRecords: actor2.canManageAllRecords,
+    capacityMode: "waitlist"
+  });
+  if (args.idempotencyKey) {
+    const row = await prisma.classBooking.findUnique({ where: { id: result.bookingId }, select: { history: true } });
+    const history2 = Array.isArray(row?.history) ? row.history : [];
+    if (history2[0]) history2[0] = { ...history2[0], idempotencyKey: args.idempotencyKey };
+    await prisma.classBooking.update({ where: { id: result.bookingId }, data: { history: history2 } });
+  }
+  return bookingResult(prisma, result.bookingId, result.creditsRemaining);
+}
+async function bookingResult(prisma, bookingId, creditsRemaining) {
+  const booking = await prisma.classBooking.findUnique({ where: { id: bookingId }, include: { spot: { select: { id: true, number: true, label: true } } } });
+  return {
+    bookingId: booking.id,
+    status: booking.status,
+    spot: booking.spot ? { id: booking.spot.id, number: booking.spot.number, label: booking.spot.label } : null,
+    waitlistPosition: booking.waitlistPosition ?? null,
+    creditsRemaining: creditsRemaining ?? 0
+  };
+}
+async function joinWaitlist(root, args, context) {
+  const result = await bookClassWithSpot(root, { classInstanceId: args.classInstanceId, memberId: args.memberId ?? null, spotId: null }, context);
+  if (result.status !== "waitlisted") return { ...result, message: "A machine was free, so you are booked." };
+  return { ...result, message: `You are number ${result.waitlistPosition} on the waitlist.` };
+}
+async function leaveWaitlist(_root, args, context) {
+  const actor2 = await currentRoleActor(context);
+  const booking = await guardKeystonePrismaResults(context.prisma).classBooking.findFirst({ where: { id: args.bookingId, organizationId: actor2.organizationId }, select: { status: true } });
+  if (!booking) throw new Error("Booking not found");
+  if (booking.status !== "waitlisted") throw new Error("This booking is not on a waitlist");
+  const result = await cancelCapacityControlledBooking(context.prisma, { bookingId: args.bookingId, actor: actor2 });
+  return { bookingId: args.bookingId, left: Boolean(result.cancelled) };
+}
+async function changeBookingSpot(_root, args, context) {
+  const actor2 = await currentRoleActor(context);
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  return prisma.$transaction(async (tx) => {
+    const identity = await tx.classBooking.findFirst({ where: { id: args.bookingId, organizationId: actor2.organizationId }, select: { classInstanceId: true } });
+    if (!identity?.classInstanceId) throw new Error("Booking not found");
+    await lockParticipationPolicy(tx, actor2.organizationId);
+    await lockTransactionKey(tx, `class-instance:${identity.classInstanceId}`);
+    const booking = await tx.classBooking.findFirst({ where: { id: args.bookingId, organizationId: actor2.organizationId }, include: { member: { select: { userId: true } }, classInstance: { include: INSTANCE_INCLUDE } } });
+    if (!booking) throw new Error("Booking not found");
+    if (booking.member?.userId !== actor2.userId && !actor2.canManageAllRecords && !actor2.canManageCheckIns) throw new Error("You cannot change another client's machine");
+    if (booking.status !== "confirmed") throw new Error("Only a confirmed booking can change machine");
+    const instance = booking.classInstance;
+    if (instance.isCancelled) throw new Error("This class was cancelled");
+    if (instance.date.getTime() <= Date.now() && !actor2.canManageAllRecords && !actor2.canManageCheckIns) throw new Error("The class has started; ask the front desk to move you");
+    if (classCapacityMode(instance) !== "pick_a_spot") throw new Error("This class does not use numbered machines");
+    if (booking.spotId === args.spotId) return { bookingId: booking.id, spotId: booking.spotId, changed: false };
+    const spots = await bookableSpots(tx, instance);
+    const { taken } = await takenSpots(tx, instance);
+    const spot = spots.find((candidate) => candidate.id === args.spotId);
+    if (!spot) throw new Error("That machine is not available for this class");
+    if (taken.has(spot.id)) throw new Error(`${spot.label} is taken. Choose another machine.`);
+    await tx.classBooking.update({ where: { id: booking.id }, data: {
+      spotId: spot.id,
+      activeSpotKey: "active",
+      history: appendHistory(booking.history, historyEntry("spot_changed", { by: actor2.userId, from: booking.spotId, to: spot.id, spotLabel: spot.label }))
+    } });
+    return { bookingId: booking.id, spotId: spot.id, changed: true };
+  });
+}
+function canManageRooms(actor2) {
+  if (!actor2.canManageAllRecords && !actor2.canManageFacilities) throw new Error("Room management permission required");
+}
+async function saveRoomLayout(_root, args, context) {
+  const actor2 = await currentRoleActor(context);
+  canManageRooms(actor2);
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const layout = normalizeLayout(args.layout);
+  const input = Array.isArray(args.spots) ? args.spots : [];
+  if (input.length > 200) throw new Error("A room can hold at most 200 machines");
+  const numbers = /* @__PURE__ */ new Set();
+  const cells = /* @__PURE__ */ new Set();
+  for (const spot of input) {
+    if (!Number.isInteger(spot.number) || spot.number < 1 || spot.number > 500) throw new Error("Machine numbers are whole numbers from 1 to 500");
+    if (numbers.has(spot.number)) throw new Error(`Machine number ${spot.number} is used twice`);
+    numbers.add(spot.number);
+    if (!APPARATUS.includes(spot.apparatus)) throw new Error(`Unknown apparatus ${spot.apparatus}`);
+    if (!Number.isInteger(spot.x) || !Number.isInteger(spot.y) || spot.x < 0 || spot.y < 0 || spot.x >= layout.width || spot.y >= layout.height) throw new Error(`Machine ${spot.number} is outside the room grid`);
+    const cell = `${spot.x}:${spot.y}`;
+    if (cells.has(cell)) throw new Error(`Two machines share the cell ${spot.x + 1},${spot.y + 1}`);
+    cells.add(cell);
+  }
+  return prisma.$transaction(async (tx) => {
+    await lockTransactionKey(tx, `room:${args.roomId}`);
+    const room = await tx.room.findFirst({ where: { id: args.roomId, organizationId: actor2.organizationId } });
+    if (!room) throw new Error("Room not found");
+    const existing = await tx.spot.findMany({ where: { roomId: room.id, organizationId: actor2.organizationId, retiredAt: null }, take: 500 });
+    const keep = new Set(input.map((spot) => spot.id).filter(Boolean));
+    const retiring = existing.filter((spot) => !keep.has(spot.id));
+    if (retiring.length) {
+      const held = await tx.classBooking.count({ where: { organizationId: actor2.organizationId, spotId: { in: retiring.map((spot) => spot.id) }, status: "confirmed", classInstance: { date: { gt: /* @__PURE__ */ new Date() } } } });
+      if (held) throw new Error(`${held} upcoming booking${held === 1 ? " holds" : "s hold"} a machine you removed. Mark it out of service and move the clients first.`);
+    }
+    const now = /* @__PURE__ */ new Date();
+    for (const spot of retiring) await tx.spot.update({ where: { id: spot.id }, data: { retiredAt: now, number: 1e3 + Math.floor(Math.random() * 1e6) } });
+    for (const spot of existing.filter((s) => keep.has(s.id))) await tx.spot.update({ where: { id: spot.id }, data: { number: 2e6 + spot.number } });
+    const saved = [];
+    for (const spot of input) {
+      const data = { number: spot.number, label: (spot.label || `${spot.apparatus[0].toUpperCase()}${spot.apparatus.slice(1)} ${spot.number}`).slice(0, 60), apparatus: spot.apparatus, x: spot.x, y: spot.y, isBookable: spot.isBookable !== false, notes: (spot.notes || "").slice(0, 500) };
+      if (spot.id) {
+        if (!existing.some((row) => row.id === spot.id)) throw new Error("A machine in the layout belongs to another room");
+        saved.push(await tx.spot.update({ where: { id: spot.id }, data }));
+      } else saved.push(await tx.spot.create({ data: { ...data, organizationId: actor2.organizationId, roomId: room.id } }));
+    }
+    const bookable = saved.filter((spot) => spot.isBookable).length;
+    await tx.room.update({ where: { id: room.id }, data: { layout, capacity: Math.max(bookable, 1) } });
+    return { roomId: room.id, spots: saved.length, bookable, retired: retiring.length };
+  }, { timeout: 3e4 });
+}
+async function setSpotOutOfService(_root, args, context) {
+  const actor2 = await currentRoleActor(context);
+  canManageRooms(actor2);
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const from = args.from ? new Date(args.from) : /* @__PURE__ */ new Date();
+  const until = args.until ? new Date(args.until) : null;
+  if (!Number.isFinite(from.getTime()) || until && (!Number.isFinite(until.getTime()) || until <= from)) throw new Error("The out-of-service window is invalid");
+  const spot = await prisma.spot.findFirst({ where: { id: args.spotId, organizationId: actor2.organizationId } });
+  if (!spot) throw new Error("Machine not found");
+  await prisma.$transaction(async (tx) => {
+    await lockTransactionKey(tx, `room:${spot.roomId}`);
+    await tx.spot.update({ where: { id: spot.id }, data: args.outOfService ? { outOfServiceFrom: from, outOfServiceUntil: until, notes: (args.notes ?? spot.notes ?? "").slice(0, 500) } : { outOfServiceFrom: null, outOfServiceUntil: null } });
+  });
+  if (!args.outOfService) return { spotId: spot.id, outOfService: false, moved: 0, unresolved: [] };
+  const affected = await prisma.classBooking.findMany({ where: { organizationId: actor2.organizationId, spotId: spot.id, status: "confirmed", classInstance: { isCancelled: false, date: { gte: from, ...until ? { lt: until } : {} } } }, select: { id: true, classInstanceId: true }, take: 500 });
+  let moved = 0;
+  const unresolved = [];
+  for (const booking of affected) {
+    const outcome = await prisma.$transaction(async (tx) => {
+      await lockTransactionKey(tx, `class-instance:${booking.classInstanceId}`);
+      const instance = await tx.classInstance.findFirst({ where: { id: booking.classInstanceId }, include: INSTANCE_INCLUDE });
+      const spots = await bookableSpots(tx, instance);
+      const { taken } = await takenSpots(tx, instance);
+      const free = spots.find((candidate) => !taken.has(candidate.id));
+      if (!free) return false;
+      const row = await tx.classBooking.findUnique({ where: { id: booking.id }, select: { history: true } });
+      await tx.classBooking.update({ where: { id: booking.id }, data: { spotId: free.id, activeSpotKey: "active", history: appendHistory(row?.history, historyEntry("spot_changed", { by: actor2.userId, from: spot.id, to: free.id, reason: "machine out of service" })) } });
+      return true;
+    });
+    if (outcome) moved += 1;
+    else unresolved.push(booking.id);
+  }
+  return { spotId: spot.id, outOfService: true, moved, unresolved };
+}
+async function promoteWaitlistBooking(_root, args, context) {
+  const actor2 = await currentRoleActor(context);
+  if (!actor2.canManageAllRecords && !actor2.canManageCheckIns) throw new Error("Waitlist management permission required");
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const booking = await prisma.classBooking.findFirst({ where: { id: args.bookingId, organizationId: actor2.organizationId }, select: { classInstanceId: true, status: true } });
+  if (!booking?.classInstanceId) throw new Error("Booking not found");
+  if (booking.status !== "waitlisted") throw new Error("This booking is not on the waitlist");
+  const { promoteCapacityControlledWaitlistBooking: promoteCapacityControlledWaitlistBooking2 } = await Promise.resolve().then(() => (init_classCapacity(), classCapacity_exports));
+  return promoteCapacityControlledWaitlistBooking2(context.prisma, booking.classInstanceId, actor2.organizationId, { preferredSpotId: args.spotId ?? null, onlyBookingId: args.bookingId });
+}
+async function roomsWorkspace(_root, _args, context) {
+  const actor2 = await currentRoleActor(context);
+  canManageRooms(actor2);
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const rooms = await prisma.room.findMany({ where: { organizationId: actor2.organizationId }, orderBy: [{ name: "asc" }], include: { location: { select: { id: true, name: true } }, spots: { where: { retiredAt: null }, orderBy: [{ number: "asc" }] } }, take: 200 });
+  const now = /* @__PURE__ */ new Date();
+  return rooms.map((room) => ({
+    id: room.id,
+    name: room.name,
+    isActive: room.isActive,
+    location: room.location,
+    layout: normalizeLayout(room.layout),
+    spots: room.spots.map((spot) => ({ id: spot.id, number: spot.number, label: spot.label, apparatus: spot.apparatus, x: spot.x, y: spot.y, isBookable: spot.isBookable, inService: spotInService(spot, now), outOfServiceFrom: spot.outOfServiceFrom, outOfServiceUntil: spot.outOfServiceUntil, notes: spot.notes }))
+  }));
+}
+var INSTANCE_INCLUDE, roomTypeDefs;
+var init_rooms = __esm({
+  "features/keystone/mutations/rooms.ts"() {
+    "use strict";
+    init_currentRoleActor();
+    init_prisma_result();
+    init_operational_policy();
+    init_spots();
+    init_Spot();
+    init_classCapacity();
+    init_studioLifecycle();
+    INSTANCE_INCLUDE = {
+      resource: { select: { id: true, name: true, layout: true, isActive: true, capacity: true } },
+      location: { select: { id: true, name: true } },
+      classSchedule: { select: { id: true, name: true, maxCapacity: true, resourceId: true, startTime: true, endTime: true, isActive: true, resource: { select: { id: true, name: true, layout: true, isActive: true, capacity: true } }, classType: { select: { id: true, name: true, capacityMode: true, apparatus: true } } } }
+    };
+    roomTypeDefs = `
+  type BookedSpot { id: ID!, number: Int!, label: String! }
+  type BookClassWithSpotResult { bookingId: ID!, status: String!, spot: BookedSpot, waitlistPosition: Int, creditsRemaining: Int!, message: String }
+  extend type Query {
+    classAvailability(classInstanceId: ID!): JSON!
+    roomsWorkspace: JSON!
+  }
+  extend type Mutation {
+    joinWaitlist(classInstanceId: ID!, memberId: ID): BookClassWithSpotResult!
+    leaveWaitlist(bookingId: ID!): JSON!
+    changeBookingSpot(bookingId: ID!, spotId: ID!): JSON!
+    saveRoomLayout(roomId: ID!, layout: JSON!, spots: JSON!): JSON!
+    setSpotOutOfService(spotId: ID!, outOfService: Boolean!, from: String, until: String, notes: String): JSON!
+    promoteWaitlistBooking(bookingId: ID!, spotId: ID): JSON!
+  }
+`;
   }
 });
 
@@ -1721,195 +4448,16 @@ function s3ForcePathStyle(endpoint2) {
 
 // features/keystone/index.ts
 var import_auth2 = require("@keystone-6/auth");
-var import_core41 = require("@keystone-6/core");
+var import_core42 = require("@keystone-6/core");
 var import_config = require("dotenv/config");
 
 // features/keystone/models/Organization.ts
 var import_core = require("@keystone-6/core");
 var import_fields2 = require("@keystone-6/core/fields");
 var import_access = require("@keystone-6/core/access");
-
-// features/keystone/access/tenantPolicy.ts
-function getTenantId(session) {
-  const id = session?.data?.organization?.id;
-  return typeof id === "string" && id.length > 0 ? id : null;
-}
-function tenantFilter({ session }, narrowerFilter) {
-  const organizationId = getTenantId(session);
-  if (!organizationId) return false;
-  const organizationFilter = { organization: { id: { equals: organizationId } } };
-  if (!narrowerFilter) return organizationFilter;
-  return { AND: [organizationFilter, narrowerFilter] };
-}
-function tenantItemAccess({ session, item }) {
-  const organizationId = getTenantId(session);
-  if (!organizationId || !item) return false;
-  const itemOrganizationId = item.organizationId ?? item.organization?.id;
-  return itemOrganizationId === organizationId;
-}
-function canManageTenant({ session }, permission) {
-  if (!getTenantId(session)) return false;
-  if (session?.data?.role?.canManageAllRecords) return true;
-  return permission ? Boolean(session?.data?.role?.[permission]) : false;
-}
-
-// features/keystone/access.ts
-function isOperatorSession(session) {
-  return session?.data.role?.canManageAllRecords ?? false;
-}
-function canSeePeople(session) {
-  const role = session?.data.role;
-  return Boolean(role?.canManageAllRecords || role?.canSeeOtherPeople || role?.canEditOtherPeople || role?.canManagePeople);
-}
-function canEditPeople(session) {
-  const role = session?.data.role;
-  return Boolean(role?.canManageAllRecords || role?.canEditOtherPeople || role?.canManagePeople);
-}
-function ownBookingFilter(session) {
-  return { member: { user: { id: { equals: session.itemId } } } };
-}
-function ownerFilter(session, filter) {
-  if (!session) return false;
-  return tenantFilter(
-    { session },
-    isOperatorSession(session) ? void 0 : filter
-  );
-}
-function isSignedIn({ session }) {
-  return Boolean(session);
-}
-var permissions = {
-  canCreateRecords: ({ session }) => session?.data.role?.canCreateRecords ?? false,
-  canManageAllRecords: ({ session }) => isOperatorSession(session),
-  canManagePeople: ({ session }) => session?.data.role?.canManagePeople ?? false,
-  canManageRoles: ({ session }) => session?.data.role?.canManageRoles ?? false,
-  canAccessDashboard: ({ session }) => session?.data.role?.canAccessDashboard ?? false,
-  canManageOnboarding: ({ session }) => session?.data.role?.canManageOnboarding ?? false,
-  canManageSettings: ({ session }) => session?.data.role?.canManageSettings ?? false,
-  canManageAppointments: ({ session }) => session?.data.role?.canManageAppointments ?? false,
-  canManageCheckIns: ({ session }) => session?.data.role?.canManageCheckIns ?? false,
-  canManageFacilities: ({ session }) => session?.data.role?.canManageFacilities ?? false,
-  canManagePrograms: ({ session }) => session?.data.role?.canManagePrograms ?? false,
-  canManageCommunications: ({ session }) => session?.data.role?.canManageCommunications ?? false,
-  canManageRetail: ({ session }) => session?.data.role?.canManageRetail ?? false,
-  canManagePayroll: ({ session }) => session?.data.role?.canManagePayroll ?? false,
-  canViewReports: ({ session }) => session?.data.role?.canViewReports ?? false,
-  isInstructor: ({ session }) => session?.data.role?.isInstructor ?? false
-};
-var rules = {
-  canReadOwnUser: ({ session }) => {
-    if (!session) return false;
-    const narrower = canSeePeople(session) ? void 0 : { id: { equals: session.itemId } };
-    return tenantFilter({ session }, narrower);
-  },
-  canReadOwnMember: ({ session }) => {
-    if (!session) return false;
-    const narrower = canSeePeople(session) ? void 0 : { user: { id: { equals: session.itemId } } };
-    return tenantFilter({ session }, narrower);
-  },
-  canUpdateMember: ({ session }) => {
-    if (!session) return false;
-    const narrower = canEditPeople(session) ? void 0 : { user: { id: { equals: session.itemId } } };
-    return tenantFilter({ session }, narrower);
-  },
-  canReadOwnMembership: ({ session }) => ownerFilter(session, { member: { id: { equals: session?.itemId } } }),
-  canReadOwnMemberResource: ({ session }) => ownerFilter(session, { member: { user: { id: { equals: session?.itemId } } } }),
-  canReadOwnPaymentSession: ({ session }) => ownerFilter(session, { user: { id: { equals: session?.itemId } } }),
-  canReadOwnPaymentSessionField: ({ session, item }) => Boolean(session && (isOperatorSession(session) || item?.userId === session.itemId)),
-  canReadOwnMemberField: ({ session, item }) => Boolean(
-    session && tenantItemAccess({ session, item }) && (isOperatorSession(session) || item?.userId === session.itemId)
-  ),
-  canReadOwnBooking: ({ session }) => {
-    if (!session) return false;
-    const memberFilter = { member: { user: { id: { equals: session.itemId } } } };
-    if (isOperatorSession(session)) return tenantFilter({ session });
-    if (!session.data.role?.isInstructor) return tenantFilter({ session }, memberFilter);
-    return tenantFilter({ session }, { OR: [memberFilter, { classInstance: {
-      OR: [
-        { instructor: { user: { id: { equals: session.itemId } }, isActive: { equals: true } } },
-        { AND: [{ instructor: null }, { classSchedule: { instructor: { user: { id: { equals: session.itemId } }, isActive: { equals: true } } } }] }
-      ]
-    } }] });
-  },
-  canReadOwnAttendance: ({ session }) => {
-    if (!session) return false;
-    const memberFilter = { member: { user: { id: { equals: session.itemId } } } };
-    if (isOperatorSession(session)) return tenantFilter({ session });
-    if (!session.data.role?.isInstructor) return tenantFilter({ session }, memberFilter);
-    return tenantFilter({ session }, { OR: [memberFilter, { booking: { classInstance: {
-      OR: [
-        { instructor: { user: { id: { equals: session.itemId } }, isActive: { equals: true } } },
-        { AND: [{ instructor: null }, { classSchedule: { instructor: { user: { id: { equals: session.itemId } }, isActive: { equals: true } } } }] }
-      ]
-    } } }] });
-  },
-  // Role managers list the tenant's roles they may assign; everyone else reads their own role.
-  canReadOwnRole: ({ session }) => {
-    if (!session) return false;
-    const narrower = isOperatorSession(session) || session.data.role?.canManageRoles ? void 0 : { assignedTo: { some: { id: { equals: session.itemId } } } };
-    return tenantFilter({ session }, narrower);
-  },
-  // Members keep reading templates and sessions they booked after a pause or
-  // cancellation, so booking history retains the class name and date.
-  canReadClassSchedule: ({ session }) => tenantFilter(
-    { session },
-    isOperatorSession(session) ? void 0 : session?.itemId ? { OR: [{ isActive: { equals: true } }, { instances: { some: { bookings: { some: ownBookingFilter(session) } } } }] } : { isActive: { equals: true } }
-  ),
-  canReadInstructor: ({ session }) => tenantFilter(
-    { session },
-    isOperatorSession(session) ? void 0 : { isActive: { equals: true } }
-  ),
-  canReadClassInstance: ({ session }) => tenantFilter(
-    { session },
-    isOperatorSession(session) ? void 0 : session?.itemId ? { OR: [{ isCancelled: { equals: false } }, { bookings: { some: ownBookingFilter(session) } }] } : { isCancelled: { equals: false } }
-  ),
-  // Backward-compatible aliases for the existing User/Member update boundaries.
-  canReadPeople: ({ session }) => {
-    if (!session) return false;
-    return tenantFilter(
-      { session },
-      canSeePeople(session) ? void 0 : { id: { equals: session.itemId } }
-    );
-  },
-  // Contact details of same-tenant people; login email, password and role keep their own field rules.
-  canUpdatePeople: ({ session }) => {
-    if (!session) return false;
-    return tenantFilter(
-      { session },
-      canEditPeople(session) ? void 0 : { id: { equals: session.itemId } }
-    );
-  },
-  canDeletePeople: ({ session }) => {
-    if (!session || !session.data?.role?.canManagePeople) return false;
-    return tenantFilter({ session });
-  }
-};
-
-// features/keystone/models/trackingFields.ts
-var import_fields = require("@keystone-6/core/fields");
-var trackingFields = {
-  createdAt: (0, import_fields.timestamp)({
-    access: { read: () => true, create: () => false, update: () => false },
-    validation: { isRequired: true },
-    defaultValue: { kind: "now" },
-    ui: {
-      createView: { fieldMode: "hidden" },
-      itemView: { fieldMode: "read" }
-    }
-  }),
-  updatedAt: (0, import_fields.timestamp)({
-    access: { read: () => true, create: () => false, update: () => false },
-    db: { updatedAt: true },
-    validation: { isRequired: true },
-    defaultValue: { kind: "now" },
-    ui: {
-      createView: { fieldMode: "hidden" },
-      itemView: { fieldMode: "read" }
-    }
-  })
-};
-
-// features/keystone/models/Organization.ts
+init_access();
+init_tenantPolicy();
+init_trackingFields();
 var ownOrganization = ({ session, item }) => getTenantId(session) === item?.id;
 var ownOrganizationFilter = ({ session }) => {
   const organizationId = getTenantId(session);
@@ -1993,116 +4541,9 @@ var Organization = (0, import_core.list)({
 var import_core2 = require("@keystone-6/core");
 var import_access3 = require("@keystone-6/core/access");
 var import_fields3 = require("@keystone-6/core/fields");
-
-// features/keystone/models/tenantRelationships.ts
-init_prisma_result();
-function requiredRelationshipDb(relationName) {
-  return (field) => field.replace(new RegExp(`(${relationName}\\s+\\w+)\\?`), "$1").replace(new RegExp(`(${relationName}Id\\s+String)\\?`), "$1");
-}
-function restrictDeleteDb(field) {
-  return field.replace(/@relation\(([^)]*fields:[^)]*)\)/, "@relation($1, onDelete: Restrict)");
-}
-function compoundUniqueDb(...constraints) {
-  return (schema) => {
-    const additions = constraints.map((constraint) => `  @@unique([${constraint}])`).join("\n");
-    return schema.replace(/\n}/, `
-${additions}
-}`);
-  };
-}
-function connectedRelationshipId(value) {
-  if (!value || typeof value !== "object") return void 0;
-  const relationship40 = value;
-  if (relationship40.disconnect) return null;
-  return typeof relationship40.connect?.id === "string" ? relationship40.connect.id : void 0;
-}
-function tenantOrganizationId(resolvedData, item) {
-  const connected = connectedRelationshipId(resolvedData.organization);
-  if (connected !== void 0) return connected;
-  return item?.organizationId ?? void 0;
-}
-function validateTenantOwnership(targets, options = {}) {
-  return async function validateTenantOwnershipInput({
-    resolvedData,
-    item,
-    context,
-    addValidationError,
-    session,
-    operation
-  }) {
-    const sessionOrganizationId = argsSessionOrganizationId({ session, context });
-    const requireOrganization = options.requireOrganization ?? true;
-    if (operation === "create" && resolvedData.organization === void 0 && sessionOrganizationId) {
-      resolvedData.organization = { connect: { id: sessionOrganizationId } };
-    } else if (operation === "create" && resolvedData.organization === void 0 && !requireOrganization) {
-      const [defaultOrganization] = await context.sudo().query.Organization.findMany({
-        take: 1,
-        orderBy: [{ createdAt: "asc" }],
-        query: "id"
-      });
-      if (defaultOrganization?.id) {
-        resolvedData.organization = { connect: { id: defaultOrganization.id } };
-      }
-    }
-    const organizationId = tenantOrganizationId(resolvedData, item);
-    if (!organizationId && requireOrganization) {
-      addValidationError("A tenant organization is required");
-      return;
-    }
-    if (!organizationId) return;
-    if (sessionOrganizationId && sessionOrganizationId !== organizationId) {
-      addValidationError("The relationship must belong to the signed-in organization");
-      return;
-    }
-    if (resolvedData.organization !== void 0) {
-      const connectedOrganizationId = connectedRelationshipId(resolvedData.organization);
-      if (connectedOrganizationId !== organizationId) {
-        addValidationError("The tenant organization cannot be reassigned");
-        return;
-      }
-    }
-    const prisma = guardKeystonePrismaResults(context.prisma);
-    for (const target of targets) {
-      const relationshipValue = resolvedData[target.field];
-      const relationshipId = relationshipValue === void 0 ? item?.[`${target.field}Id`] : connectedRelationshipId(relationshipValue);
-      if (!relationshipId) {
-        if (target.required) addValidationError(`${target.field} is required`);
-        continue;
-      }
-      const related = await prisma[target.list].findUnique({
-        where: { id: relationshipId },
-        select: { id: true, organizationId: true }
-      });
-      if (!related) {
-        addValidationError(`${target.field} was not found`);
-      } else if (related.organizationId !== organizationId) {
-        addValidationError(`${target.field} must belong to the same organization`);
-      }
-    }
-  };
-}
-function argsSessionOrganizationId(args) {
-  const id = (args?.session ?? args?.context?.session)?.data?.organization?.id;
-  return typeof id === "string" && id.length > 0 ? id : null;
-}
-async function validateResourceLocation({
-  resolvedData,
-  item,
-  context,
-  addValidationError
-}) {
-  const locationId = resolvedData.location === void 0 ? item?.locationId : connectedRelationshipId(resolvedData.location);
-  const resourceId = resolvedData.resource === void 0 ? item?.resourceId : connectedRelationshipId(resolvedData.resource);
-  if (!locationId || !resourceId) return;
-  const prisma = guardKeystonePrismaResults(context.prisma);
-  const resource = await prisma.room.findUnique({
-    where: { id: resourceId },
-    select: { locationId: true }
-  });
-  if (resource && resource.locationId !== locationId) {
-    addValidationError("resource must belong to the selected location");
-  }
-}
+init_access();
+init_trackingFields();
+init_tenantRelationships();
 
 // features/keystone/models/roleCapabilities.ts
 var roleCapabilityFields = [
@@ -2467,6 +4908,9 @@ var User = (0, import_core2.list)({
 var import_core3 = require("@keystone-6/core");
 var import_access5 = require("@keystone-6/core/access");
 var import_fields4 = require("@keystone-6/core/fields");
+init_access();
+init_trackingFields();
+init_tenantRelationships();
 init_prisma_result();
 function holdsFullCapability(role) {
   return role?.canManageAllRecords === true && role?.canManageRoles === true;
@@ -2589,6 +5033,9 @@ var Role = (0, import_core3.list)({
 var import_core4 = require("@keystone-6/core");
 var import_access7 = require("@keystone-6/core/access");
 var import_fields5 = require("@keystone-6/core/fields");
+init_access();
+init_trackingFields();
+init_tenantRelationships();
 init_prisma_result();
 init_classCapacity();
 function sensitiveMemberRead({ session, item }) {
@@ -2920,6 +5367,10 @@ var import_core5 = require("@keystone-6/core");
 var import_access9 = require("@keystone-6/core/access");
 var import_fields6 = require("@keystone-6/core/fields");
 var import_fields_document = require("@keystone-6/fields-document");
+init_access();
+init_tenantPolicy();
+init_trackingFields();
+init_tenantRelationships();
 
 // features/integrations/payment/commercial-agreement.ts
 function decimalToMinor(value) {
@@ -2975,10 +5426,10 @@ function snapshotMembershipAgreement(tier, billingCycle, currencyCode, options =
 }
 function acceptedProviderPrice(agreement, fallbacks) {
   const amount = Number.isSafeInteger(agreement?.amount) ? agreement.amount : null;
-  const text42 = (value) => typeof value === "string" && value ? value : null;
-  if (text42(agreement?.providerPriceId)) return { priceId: agreement.providerPriceId, productId: text42(agreement.providerProductId), amount, basis: "agreement" };
-  if (text42(fallbacks.checkoutPriceId)) return { priceId: fallbacks.checkoutPriceId, productId: text42(fallbacks.checkoutProductId), amount, basis: "checkout" };
-  if (text42(fallbacks.tierPriceId)) return { priceId: fallbacks.tierPriceId, productId: null, amount, basis: "catalog" };
+  const text43 = (value) => typeof value === "string" && value ? value : null;
+  if (text43(agreement?.providerPriceId)) return { priceId: agreement.providerPriceId, productId: text43(agreement.providerProductId), amount, basis: "agreement" };
+  if (text43(fallbacks.checkoutPriceId)) return { priceId: fallbacks.checkoutPriceId, productId: text43(fallbacks.checkoutProductId), amount, basis: "checkout" };
+  if (text43(fallbacks.tierPriceId)) return { priceId: fallbacks.tierPriceId, productId: null, amount, basis: "catalog" };
   return null;
 }
 var providerId = (value) => typeof value === "string" ? value : value?.id || null;
@@ -3288,108 +5739,10 @@ var MembershipTier = (0, import_core5.list)({
 var import_core6 = require("@keystone-6/core");
 var import_access11 = require("@keystone-6/core/access");
 var import_fields7 = require("@keystone-6/core/fields");
-
-// features/keystone/lib/lifecycles.ts
-var m = (table) => Object.fromEntries(Object.entries(table).map(([from, to]) => [from, new Set(to)]));
-var MEMBERSHIP_MACHINE = m({
-  active: ["frozen", "cancelled", "expired", "past-due"],
-  frozen: ["active", "cancelled", "expired", "past-due"],
-  "past-due": ["active", "frozen", "cancelled", "expired"],
-  expired: ["active", "frozen", "past-due", "cancelled"],
-  cancelled: []
-});
-var SUBSCRIPTION_MACHINE = m({
-  active: ["paused", "past_due", "cancelled"],
-  paused: ["active", "past_due", "cancelled"],
-  past_due: ["active", "paused", "cancelled"],
-  cancelled: []
-});
-var BOOKING_MACHINE = m({
-  confirmed: ["cancelled"],
-  waitlist: ["confirmed", "cancelled"],
-  cancelled: []
-});
-var MEMBER_ACCOUNT_MACHINE = m({
-  active: ["suspended", "cancelled"],
-  suspended: ["active", "cancelled"],
-  cancelled: []
-});
-var GIFT_CARD_MACHINE = m({
-  active: ["redeemed", "voided"],
-  redeemed: [],
-  voided: []
-});
-var TRAINING_PACKAGE_MACHINE = m({
-  active: ["refunded"],
-  refunded: []
-});
-var PAYMENT_SESSION_MACHINE = m({
-  pending: ["processing", "requires_action", "completed", "failed", "expired", "cancelled"],
-  processing: ["requires_action", "completed", "failed", "expired", "cancelled"],
-  requires_action: ["processing", "completed", "failed", "expired", "cancelled"],
-  failed: ["processing", "requires_action", "expired"],
-  completed: [],
-  expired: [],
-  cancelled: []
-});
-function canTransition(machine, from, to) {
-  if (from === to) return true;
-  return Boolean(machine[from]?.has(to));
-}
-function assertTransition(machine, label, from, to) {
-  if (!Object.hasOwn(machine, from)) throw new Error(`Unknown ${label} status: ${from}`);
-  if (!Object.hasOwn(machine, to)) throw new Error(`Unknown ${label} status: ${to}`);
-  if (!canTransition(machine, from, to)) throw new Error(`Invalid ${label} status transition: ${from} -> ${to}`);
-}
-function settleTransition(machine, from, to) {
-  if (!from || !Object.hasOwn(machine, from)) return to;
-  return canTransition(machine, from, to) ? to : from;
-}
-
-// features/keystone/mutations/studioLifecyclePolicy.ts
-function assertMembershipStatusTransition(previous, next) {
-  assertTransition(MEMBERSHIP_MACHINE, "membership", previous, next);
-}
-function assertBookingStatusTransition(previous, next) {
-  assertTransition(BOOKING_MACHINE, "booking", previous, next);
-}
-function normalizeAttendanceOutcome(value) {
-  if (value === "attended" || value === "late" || value === "no-show") return value;
-  throw new Error("Attendance outcome must be attended, late, or no-show");
-}
-function normalizeCheckInMethod(value) {
-  if (value === "qr_code" || value === "rfid" || value === "manual" || value === "app") {
-    return value;
-  }
-  throw new Error("Check-in method is not supported");
-}
-function addPolicyError(addValidationError, operation) {
-  try {
-    operation();
-  } catch (error) {
-    addValidationError(error instanceof Error ? error.message : String(error));
-  }
-}
-var membershipLifecycleHooks = {
-  validateInput({ operation, item, resolvedData, addValidationError }) {
-    if (operation !== "update" || !item || resolvedData.status === void 0) return;
-    addPolicyError(
-      addValidationError,
-      () => assertMembershipStatusTransition(item.status, resolvedData.status)
-    );
-  }
-};
-var bookingLifecycleHooks = {
-  validateInput({ operation, item, resolvedData, addValidationError }) {
-    if (operation !== "update" || !item || resolvedData.status === void 0) return;
-    addPolicyError(
-      addValidationError,
-      () => assertBookingStatusTransition(item.status, resolvedData.status)
-    );
-  }
-};
-
-// features/keystone/models/Membership.ts
+init_access();
+init_trackingFields();
+init_studioLifecyclePolicy();
+init_tenantRelationships();
 var Membership = (0, import_core6.list)({
   hooks: {
     async validateInput(args) {
@@ -3564,6 +5917,8 @@ var Membership = (0, import_core6.list)({
 var import_core7 = require("@keystone-6/core");
 var import_access13 = require("@keystone-6/core/access");
 var import_fields8 = require("@keystone-6/core/fields");
+init_access();
+init_trackingFields();
 
 // features/keystone/models/paymentEvidence.ts
 var STUDIO_SETTLED = /* @__PURE__ */ new Set(["succeeded", "refunded"]);
@@ -3686,6 +6041,7 @@ function paymentEvidenceHooks(model) {
 }
 
 // features/keystone/models/MembershipPayment.ts
+init_tenantRelationships();
 var MembershipPayment = (0, import_core7.list)({
   hooks: {
     async validateInput(args) {
@@ -3876,6 +6232,9 @@ var MembershipPayment = (0, import_core7.list)({
 var import_core8 = require("@keystone-6/core");
 var import_access15 = require("@keystone-6/core/access");
 var import_fields9 = require("@keystone-6/core/fields");
+init_access();
+init_trackingFields();
+init_tenantRelationships();
 var Subscription = (0, import_core8.list)({
   access: {
     operation: {
@@ -4011,6 +6370,9 @@ var Subscription = (0, import_core8.list)({
 var import_core9 = require("@keystone-6/core");
 var import_access17 = require("@keystone-6/core/access");
 var import_fields10 = require("@keystone-6/core/fields");
+init_access();
+init_trackingFields();
+init_tenantRelationships();
 var Payment = (0, import_core9.list)({
   hooks: {
     async validateInput(args) {
@@ -4193,6 +6555,9 @@ var Payment = (0, import_core9.list)({
 var import_core10 = require("@keystone-6/core");
 var import_access19 = require("@keystone-6/core/access");
 var import_fields11 = require("@keystone-6/core/fields");
+init_access();
+init_trackingFields();
+init_tenantRelationships();
 var PaymentMethod = (0, import_core10.list)({
   hooks: { validateInput: validateTenantOwnership([
     { field: "member", list: "member", required: true }
@@ -4293,7 +6658,11 @@ var PaymentMethod = (0, import_core10.list)({
 var import_core11 = require("@keystone-6/core");
 var import_access21 = require("@keystone-6/core/access");
 var import_fields12 = require("@keystone-6/core/fields");
+init_access();
+init_tenantPolicy();
+init_trackingFields();
 init_prisma_result();
+init_tenantRelationships();
 var PaymentProvider = (0, import_core11.list)({
   db: {
     extendPrismaSchema(schema) {
@@ -4400,6 +6769,9 @@ var PaymentProvider = (0, import_core11.list)({
 var import_core12 = require("@keystone-6/core");
 var import_access23 = require("@keystone-6/core/access");
 var import_fields13 = require("@keystone-6/core/fields");
+init_access();
+init_trackingFields();
+init_tenantRelationships();
 var PaymentSession = (0, import_core12.list)({
   db: {
     extendPrismaSchema(schema) {
@@ -4510,6 +6882,10 @@ var PaymentSession = (0, import_core12.list)({
 var import_access25 = require("@keystone-6/core/access");
 var import_core13 = require("@keystone-6/core");
 var import_fields14 = require("@keystone-6/core/fields");
+init_access();
+init_tenantPolicy();
+init_trackingFields();
+init_tenantRelationships();
 var PaymentEvent = (0, import_core13.list)({
   db: {
     extendPrismaSchema(schema) {
@@ -4574,6 +6950,9 @@ var PaymentEvent = (0, import_core13.list)({
 var import_core14 = require("@keystone-6/core");
 var import_access27 = require("@keystone-6/core/access");
 var import_fields15 = require("@keystone-6/core/fields");
+init_access();
+init_trackingFields();
+init_tenantRelationships();
 var CheckIn = (0, import_core14.list)({
   db: { extendPrismaSchema: compoundUniqueDb("organizationId, memberId, openCheckInKey") },
   access: {
@@ -4720,6 +7099,10 @@ var CheckIn = (0, import_core14.list)({
 var import_core15 = require("@keystone-6/core");
 var import_access29 = require("@keystone-6/core/access");
 var import_fields16 = require("@keystone-6/core/fields");
+init_access();
+init_tenantPolicy();
+init_tenantRelationships();
+init_trackingFields();
 var tenantItem = (args) => tenantItemAccess(args);
 var Location = (0, import_core15.list)({
   db: { extendPrismaSchema: compoundUniqueDb("organizationId, name") },
@@ -4816,385 +7199,12 @@ var Location = (0, import_core15.list)({
 var import_core16 = require("@keystone-6/core");
 var import_access31 = require("@keystone-6/core/access");
 var import_fields17 = require("@keystone-6/core/fields");
-
-// features/keystone/utils/storeLogo.ts
-var ALLOWED_ELEMENTS = /* @__PURE__ */ new Set([
-  "svg",
-  "g",
-  "path",
-  "defs",
-  "lineargradient",
-  "radialgradient",
-  "stop",
-  "clippath",
-  "rect",
-  "circle",
-  "ellipse",
-  "line",
-  "polyline",
-  "polygon",
-  "title",
-  "desc"
-]);
-var ALLOWED_ATTRIBUTES = /* @__PURE__ */ new Set([
-  "xmlns",
-  "fill",
-  "fill-rule",
-  "clip-rule",
-  "height",
-  "width",
-  "viewbox",
-  "d",
-  "clip-path",
-  "id",
-  "x1",
-  "x2",
-  "y1",
-  "y2",
-  "gradientunits",
-  "gradienttransform",
-  "offset",
-  "stop-color",
-  "stop-opacity",
-  "opacity",
-  "cx",
-  "cy",
-  "r",
-  "rx",
-  "ry",
-  "x",
-  "y",
-  "transform",
-  "stroke",
-  "stroke-width",
-  "stroke-linecap",
-  "stroke-linejoin",
-  "points",
-  "role",
-  "aria-hidden",
-  "aria-label",
-  "preserveaspectratio"
-]);
-var ATTRIBUTE_PATTERN = /\s+([A-Za-z_:][\w:.-]*)\s*=\s*("[^"]*"|'[^']*')/g;
-var TAG_PATTERN = /<\/?\s*([A-Za-z][\w:-]*)([^<>]*)>/g;
-function sanitizeStoreLogoSvg(svg) {
-  const source = svg.trim();
-  if (!source.startsWith("<svg") || !source.endsWith("</svg>") || source.length > 1e5) {
-    return "";
-  }
-  if (/<!|<\?|\b(?:javascript|data|vbscript):|\bon[a-z]+\s*=|\b(?:href|src|style)\s*=/i.test(source)) {
-    return "";
-  }
-  let tagCount = 0;
-  let match;
-  TAG_PATTERN.lastIndex = 0;
-  while (match = TAG_PATTERN.exec(source)) {
-    tagCount += 1;
-    const element = match[1].toLowerCase();
-    if (!ALLOWED_ELEMENTS.has(element)) return "";
-    if (match[0].startsWith("</")) continue;
-    const attributes = match[2];
-    let consumed = "";
-    ATTRIBUTE_PATTERN.lastIndex = 0;
-    let attributeMatch;
-    while (attributeMatch = ATTRIBUTE_PATTERN.exec(attributes)) {
-      consumed += attributeMatch[0];
-      const attribute = attributeMatch[1].toLowerCase();
-      const value = attributeMatch[2].slice(1, -1);
-      if (!ALLOWED_ATTRIBUTES.has(attribute)) return "";
-      if (attribute === "id" && !/^[A-Za-z_][\w:.-]*$/.test(value)) return "";
-      if (/url\(/i.test(value) && !/^url\(#[A-Za-z_][\w:.-]*\)$/.test(value)) return "";
-    }
-    const remainder = attributes.replace(consumed, "").replace(/\//g, "").trim();
-    if (remainder) return "";
-  }
-  TAG_PATTERN.lastIndex = 0;
-  if (tagCount === 0 || source.replace(TAG_PATTERN, "").trim()) return "";
-  return source;
-}
-
-// features/platform/store-settings/lib/icon-registry.ts
-var LOGO_ICONS = [
-  {
-    id: "3portals",
-    name: "3Portals",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g clip-rule="evenodd" fill-rule="evenodd"><path d="m34.5868 8.40061-9.6868-2.59556c-.6687-.17919-1.2108.23679-1.2108.92911v10.02854c0 .6923.5421 1.3988 1.2108 1.578l9.6868 2.5955c.6687.1792 1.2109-.2368 1.2109-.9291v-10.02848c0-.69232-.5422-1.39882-1.2109-1.57801zm-9.6868-6.35625c-2.6749-.71674-4.8434.94718-4.8434 3.71647v10.02847c0 2.7693 2.1685 5.5953 4.8434 6.312l9.6868 2.5956c2.6749.7168 4.8434-.9472 4.8434-3.7165v-10.0284c0-2.76934-2.1685-5.59533-4.8434-6.31207z" fill="#8098f9"/><path d="m26.9812 16.5707-12.1085-3.2444c-.6687-.1792-1.2109.2368-1.2109.9291v12.5356c0 .6923.5422 1.3988 1.2109 1.578l12.1085 3.2445c.6687.1792 1.2108-.2368 1.2108-.9291v-12.5356c0-.6924-.5421-1.3989-1.2108-1.5781zm-12.1085-7.0051c-2.6749-.71674-4.8434.9472-4.8434 3.7165v12.5356c0 2.7693 2.1685 5.5953 4.8434 6.312l12.1085 3.2445c2.6749.7167 4.8433-.9472 4.8433-3.7165v-12.5356c0-2.7693-2.1684-5.5953-4.8433-6.312z" fill="#6172f3"/><path d="m19.3736 24.7409-14.53021-3.8934c-.66873-.1792-1.21085.2368-1.21085.9291v15.0428c0 .6923.54212 1.3988 1.21085 1.578l14.53021 3.8933c.6687.1792 1.2108-.2368 1.2108-.9291v-15.0427c0-.6923-.5421-1.3988-1.2108-1.578zm-14.53021-7.6541c-2.67493-.7167-4.84339.9472-4.84339 3.7165v15.0427c0 2.7693 2.16846 5.5953 4.84339 6.3121l14.53021 3.8933c2.6749.7168 4.8433-.9472 4.8433-3.7164v-15.0428c0-2.7693-2.1684-5.5953-4.8433-6.312z" fill="#444ce7"/></g></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g clip-rule="evenodd" fill="#fff" fill-rule="evenodd"><path d="m34.5868 8.40061-9.6868-2.59556c-.6687-.17919-1.2108.23679-1.2108.92911v10.02854c0 .6923.5421 1.3988 1.2108 1.578l9.6868 2.5955c.6687.1792 1.2109-.2368 1.2109-.9291v-10.02848c0-.69232-.5422-1.39882-1.2109-1.57801zm-9.6868-6.35625c-2.6749-.71674-4.8434.94718-4.8434 3.71647v10.02847c0 2.7693 2.1685 5.5953 4.8434 6.312l9.6868 2.5956c2.6749.7168 4.8434-.9472 4.8434-3.7165v-10.0284c0-2.76934-2.1685-5.59533-4.8434-6.31207z" opacity=".5"/><path d="m26.9812 16.5707-12.1085-3.2444c-.6687-.1792-1.2109.2368-1.2109.9291v12.5356c0 .6923.5422 1.3988 1.2109 1.578l12.1085 3.2445c.6687.1792 1.2108-.2368 1.2108-.9291v-12.5356c0-.6924-.5421-1.3989-1.2108-1.5781zm-12.1085-7.0051c-2.6749-.71674-4.8434.9472-4.8434 3.7165v12.5356c0 2.7693 2.1685 5.5953 4.8434 6.312l12.1085 3.2445c2.6749.7167 4.8433-.9472 4.8433-3.7165v-12.5356c0-2.7693-2.1684-5.5953-4.8433-6.312z" opacity=".7"/><path d="m19.3736 24.7409-14.53021-3.8934c-.66873-.1792-1.21085.2368-1.21085.9291v15.0428c0 .6923.54212 1.3988 1.21085 1.578l14.53021 3.8933c.6687.1792 1.2108-.2368 1.2108-.9291v-15.0427c0-.6923-.5421-1.3988-1.2108-1.578zm-14.53021-7.6541c-2.67493-.7167-4.84339.9472-4.84339 3.7165v15.0427c0 2.7693 2.16846 5.5953 4.84339 6.3121l14.53021 3.8933c2.6749.7168 4.8433-.9472 4.8433-3.7164v-15.0428c0-2.7693-2.1684-5.5953-4.8433-6.312z"/></g></svg>`
-  },
-  {
-    id: "45-degrees",
-    name: "45 Degrees",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 24 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m0 15.8981h17.3455l-17.061314 17.0613 2.756374 2.7564 17.06134-17.0613v17.3455h.1104l3.7877-3.7877v-15.9638l-4.2485-4.2485h-15.96596l-3.78553995 3.7855z" fill="#155eef"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 24 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m0 15.8981h17.3455l-17.061314 17.0613 2.756374 2.7564 17.06134-17.0613v17.3455h.1104l3.7877-3.7877v-15.9638l-4.2485-4.2485h-15.96596l-3.78553995 3.7855z" fill="#155eef"/></svg>`
-  },
-  {
-    id: "acme-corp",
-    name: "Acme Corp",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 48 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m0 24c15.2548 0 24-8.7452 24-24 0 15.2548 8.7452 24 24 24-15.2548 0-24 8.7452-24 24 0-15.2548-8.7452-24-24-24z" fill="#155eef" fill-rule="evenodd"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 48 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m0 24c15.2548 0 24-8.7452 24-24 0 15.2548 8.7452 24 24 24-15.2548 0-24 8.7452-24 24 0-15.2548-8.7452-24-24-24z" fill="#155eef" fill-rule="evenodd"/></svg>`
-  },
-  {
-    id: "alphawave",
-    name: "AlphaWave",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 47 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m24.9706 7.03309c-3.1242-3.1242-8.1896-3.1242-11.3137 0l-11.31375 11.31371c-3.124199 3.1242-3.124199 8.1895 0 11.3137l11.31375 11.3137c3.1241 3.1242 8.1895 3.1242 11.3137 0l5.3982-5.3983c-4.4939-1.7337-7.682-6.0944-7.682-11.1997 0-5.3087 3.4472-9.8123 8.2254-11.3943-.0935-.0982-.1884-.1955-.2848-.292z" fill="#155eef"/><path d="m30.3691 35.5798c1.3398.5168 2.7955.8001 4.3174.8001 6.6274 0 12-5.3726 12-12s-5.3726-12-12-12c-1.3185 0-2.5873.2126-3.774.6055 5.9623 6.2681 5.8675 16.1836-.2846 22.3356z" fill="#155eef" opacity=".7"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 47 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m24.9706 7.03309c-3.1242-3.1242-8.1896-3.1242-11.3137 0l-11.31375 11.31371c-3.124199 3.1242-3.124199 8.1895 0 11.3137l11.31375 11.3137c3.1241 3.1242 8.1895 3.1242 11.3137 0l5.3982-5.3983c-4.4939-1.7337-7.682-6.0944-7.682-11.1997 0-5.3087 3.4472-9.8123 8.2254-11.3943-.0935-.0982-.1884-.1955-.2848-.292z" fill="#155eef"/><path d="m30.3691 35.5798c1.3398.5168 2.7955.8001 4.3174.8001 6.6274 0 12-5.3726 12-12s-5.3726-12-12-12c-1.3185 0-2.5873.2126-3.774.6055 5.9623 6.2681 5.8675 16.1836-.2846 22.3356z" fill="#155eef" opacity=".7"/></svg>`
-  },
-  {
-    id: "alt-shift",
-    name: "Alt+Shift",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m23.4538 34.7189c-3.1818-1.1818-6.4544-1.3636-9.4544-.5455-2.0909.5455-4.09082 1.6364-5.90897 3l-1.27273 1.0909-.36362.3636.81816.7273c.09091 0 .09092.0909.18183.1818.18181.1818.36364.2727.63636.4545l.54542.3636.54545-.4545c.09091-.0909.27273-.2727.45454-.3636 1.63636-1.3636 3.45446-2.2727 5.36356-2.7272 2.4545-.6364 5.0908-.5455 7.7271.4545 2.1818.8182 6.6363 1.8181 11.9998-.4545l.1818-.091.2728-.2727c0-.0909.0909-.0909.1818-.1818.4545-.5454.9091-1.0909 1.2727-1.7272l1.8181-2.8182-2.909 1.6363c-4.2727 2.3636-8.1817 2.8182-12.0907 1.3637z"/><path d="m10.9998 24.9011c2.4545-.6363 5.0908-.5454 7.7272.4546 2.909 1.0909 10.3634 2.6363 18.7269-4.909l1.8182-1.8182-.1819-.4545c-.0909-.3636-.2727-.8182-.4545-1.2727l-.4545-1.2727-.9091.909c-.0909.1819-.2727.2728-.4546.4546-3.9999 4.0908-10.1816 8.2726-17.2724 5.7272-3.1817-1.1818-6.4544-1.3637-9.4544-.5455-2.909.8182-5.45442 2.3636-7.81801 4.5454v-.0909l-1.363614 1.4545c0 .0909-.090891.0909-.181798.1818l-.27274.2727.090913.3637c.090908.4545.272717.909.363625 1.3636l.545454 1.4545.90907-1.1818c.09091-.1818.27272-.2727.36363-.4545 1.90905-1.7273 4.54538-4.1818 8.27257-5.1818z"/><path d="m2.1818 23.2646c2.09088-2.1818 4.45445-3.5454 6.99987-4.2727 2.45453-.6363 5.09083-.5454 7.72713.4546 8.1817 2.9999 15.2725-1.9091 18.3633-4.5454l1.1818-1.1818.4546-.3636-.3637-.5455c-.2727-.2727-.4545-.6363-.7272-1l-.5455-.7272-.6363.6363c-.0909.0909-.2727.2727-.3637.3637-3.8181 3.6363-9.7271 7.3635-16.4542 4.8181-3.1818-1.1818-6.4544-1.3637-9.4544-.5455-1.90906.5455-3.72721 1.4545-5.54536 2.6363l-1.909065 1.5455c-.181815.1818-.272722.2727-.454537.4545l-.181799.1818v.2727c-.090907.6364-.090918 1.2727-.1818259 1.8182l-.0909131 2.2727 1.54544-1.6364c.18181-.1818.36364-.4545.63636-.6363z"/><path d="m26.0908 40.9007c-.2727-.0909-.4545-.1819-.7272-.2728-3.1818-1.1818-6.4545-1.3636-9.4545-.5454-.6363.1818-1.2726.3636-1.909.6364l-2.1818.9999-.5454.2728 1.8181.6363c.5455.1818 1.0909.3637 1.6364.5455l.2727.0909.2727-.0909c.2727-.0909.5455-.2728.8182-.2728.1818 0 .3636-.0909.5454-.1818 2.1818-.5454 4.5454-.5454 7.0908.2727.2727.091.4546.1819.7273.2728l.4545.1818.2727-.0909c.6364-.1818 1.3636-.3636 1.9091-.6364l2.5454-.909-2.6363-.6364c-.2727-.0909-.6364-.1818-.9091-.2727z"/><path d="m40 22.0829-1.3636 1.3636c-.1818.1818-.3636.3636-.5454.5454-3.7272 3.5454-9.7271 7.3635-16.4543 4.8181-3.1818-1.1818-6.4544-1.3636-9.4544-.5454-2.81811.8182-5.36354 2.2727-7.63623 4.4545l-1.18179 1.2727-.36362.4545.36362.5454c.27273.3637.45455.6364.63637 1l.54542.8182.63636-.8182c.09091-.0909.27272-.2727.36363-.3636 2.18178-2.3636 4.54534-3.8181 7.27264-4.5454 2.4545-.6364 5.0908-.5454 7.7271.4545 2.2727.8182 4.6363 1.0909 6.9999.8182 4.1817-.4545 8.3635-2.8181 11.4543-5.4544.1819-.1818.3636-.2727.5455-.4546l.2727-.2727v-.2727c0-.5455.0909-1.1818.0909-1.7273z"/><path d="m5.45373 13.7196c.54545-.2728 1.18182-.4546 1.72726-.6364 2.45451-.6364 5.09081-.5455 7.72711.4545 1.7273.6364 3.4545.9091 5.3636.9091 3.8181 0 7.6362-1.3636 11.1816-3.9999l1.8181-1.45455-.8181-.63636c-.2727-.27273-.6364-.54544-1-.72725l-.5455-.36363-.4545.36363c-.1818.09091-.2727.27272-.4545.36362-4.8181 3.63634-9.6362 4.63634-14.1816 2.90904-3.2727-1.18178-6.54535-1.45451-9.81802-.4545-.27272.0909-.54544.1818-.90907.2727l-.1818.0909-.27274.2727c0 .0909-.09089.0909-.1818.1818-.36363.5455-.81818 1-1.18181 1.5455l-1.72724 2.6363 2.81814-1.4545c.45453 0 .81815-.1818 1.09087-.2727z"/><path d="m12.9089 7.53769.2727.09091c1.1818.45454 3 .90907 5.2726.90907 2.3636 0 4.6363-.54545 6.909-1.45452l2.8181-1.36361-1.909-.63634c-.5454-.18182-1.0909-.36363-1.7273-.45454h-.2727l-.2727.09089c-.2727.0909-.5455.27274-.8182.36365-2.7272.99998-5.4544 1.1818-8.0907.45454-.2728-.09091-.5455-.18183-.8182-.27274l-.2727-.09091-.2728.09091c-.5454.18181-1.0908.36364-1.6363.63636l-2.09087.90908 2.18177.63633c.1818-.0909.4546.00001.7273.09092z"/></g></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m23.4538 34.7189c-3.1818-1.1818-6.4544-1.3636-9.4544-.5455-2.0909.5455-4.09082 1.6364-5.90897 3l-1.27273 1.0909-.36362.3636.81816.7273c.09091 0 .09092.0909.18183.1818.18181.1818.36364.2727.63636.4545l.54542.3636.54545-.4545c.09091-.0909.27273-.2727.45454-.3636 1.63636-1.3636 3.45446-2.2727 5.36356-2.7272 2.4545-.6364 5.0908-.5455 7.7271.4545 2.1818.8182 6.6363 1.8181 11.9998-.4545l.1818-.091.2728-.2727c0-.0909.0909-.0909.1818-.1818.4545-.5454.9091-1.0909 1.2727-1.7272l1.8181-2.8182-2.909 1.6363c-4.2727 2.3636-8.1817 2.8182-12.0907 1.3637z"/><path d="m10.9998 24.9011c2.4545-.6363 5.0908-.5454 7.7272.4546 2.909 1.0909 10.3634 2.6363 18.7269-4.909l1.8182-1.8182-.1819-.4545c-.0909-.3636-.2727-.8182-.4545-1.2727l-.4545-1.2727-.9091.909c-.0909.1819-.2727.2728-.4546.4546-3.9999 4.0908-10.1816 8.2726-17.2724 5.7272-3.1817-1.1818-6.4544-1.3637-9.4544-.5455-2.909.8182-5.45442 2.3636-7.81801 4.5454v-.0909l-1.363614 1.4545c0 .0909-.090891.0909-.181798.1818l-.27274.2727.090913.3637c.090908.4545.272717.909.363625 1.3636l.545454 1.4545.90907-1.1818c.09091-.1818.27272-.2727.36363-.4545 1.90905-1.7273 4.54538-4.1818 8.27257-5.1818z"/><path d="m2.1818 23.2646c2.09088-2.1818 4.45445-3.5454 6.99987-4.2727 2.45453-.6363 5.09083-.5454 7.72713.4546 8.1817 2.9999 15.2725-1.9091 18.3633-4.5454l1.1818-1.1818.4546-.3636-.3637-.5455c-.2727-.2727-.4545-.6363-.7272-1l-.5455-.7272-.6363.6363c-.0909.0909-.2727.2727-.3637.3637-3.8181 3.6363-9.7271 7.3635-16.4542 4.8181-3.1818-1.1818-6.4544-1.3637-9.4544-.5455-1.90906.5455-3.72721 1.4545-5.54536 2.6363l-1.909065 1.5455c-.181815.1818-.272722.2727-.454537.4545l-.181799.1818v.2727c-.090907.6364-.090918 1.2727-.1818259 1.8182l-.0909131 2.2727 1.54544-1.6364c.18181-.1818.36364-.4545.63636-.6363z"/><path d="m26.0908 40.9007c-.2727-.0909-.4545-.1819-.7272-.2728-3.1818-1.1818-6.4545-1.3636-9.4545-.5454-.6363.1818-1.2726.3636-1.909.6364l-2.1818.9999-.5454.2728 1.8181.6363c.5455.1818 1.0909.3637 1.6364.5455l.2727.0909.2727-.0909c.2727-.0909.5455-.2728.8182-.2728.1818 0 .3636-.0909.5454-.1818 2.1818-.5454 4.5454-.5454 7.0908.2727.2727.091.4546.1819.7273.2728l.4545.1818.2727-.0909c.6364-.1818 1.3636-.3636 1.9091-.6364l2.5454-.909-2.6363-.6364c-.2727-.0909-.6364-.1818-.9091-.2727z"/><path d="m40 22.0829-1.3636 1.3636c-.1818.1818-.3636.3636-.5454.5454-3.7272 3.5454-9.7271 7.3635-16.4543 4.8181-3.1818-1.1818-6.4544-1.3636-9.4544-.5454-2.81811.8182-5.36354 2.2727-7.63623 4.4545l-1.18179 1.2727-.36362.4545.36362.5454c.27273.3637.45455.6364.63637 1l.54542.8182.63636-.8182c.09091-.0909.27272-.2727.36363-.3636 2.18178-2.3636 4.54534-3.8181 7.27264-4.5454 2.4545-.6364 5.0908-.5454 7.7271.4545 2.2727.8182 4.6363 1.0909 6.9999.8182 4.1817-.4545 8.3635-2.8181 11.4543-5.4544.1819-.1818.3636-.2727.5455-.4546l.2727-.2727v-.2727c0-.5455.0909-1.1818.0909-1.7273z"/><path d="m5.45373 13.7196c.54545-.2728 1.18182-.4546 1.72726-.6364 2.45451-.6364 5.09081-.5455 7.72711.4545 1.7273.6364 3.4545.9091 5.3636.9091 3.8181 0 7.6362-1.3636 11.1816-3.9999l1.8181-1.45455-.8181-.63636c-.2728-.27273-.6364-.54544-1-.72725l-.5455-.36363-.4545.36363c-.1818.09091-.2727.27272-.4545.36362-4.8181 3.63634-9.6362 4.63634-14.1816 2.90904-3.2727-1.18178-6.54535-1.45451-9.81802-.4545-.27272.0909-.54544.1818-.90907.2727l-.1818.0909-.27274.2727c0 .0909-.09089.0909-.1818.1818-.36363.5455-.81818 1-1.18181 1.5455l-1.72724 2.6363 2.81814-1.4545c.45453 0 .81815-.1818 1.09087-.2727z"/><path d="m12.9089 7.53769.2727.09091c1.1818.45454 3 .90907 5.2726.90907 2.3636 0 4.6363-.54545 6.909-1.45452l2.8181-1.36361-1.909-.63634c-.5454-.18182-1.0909-.36363-1.7273-.45454h-.2727l-.2727.09089c-.2727.0909-.5455.27274-.8182.36365-2.7272.99998-5.4544 1.1818-8.0907.45454-.2728-.09091-.5455-.18183-.8182-.27274l-.2727-.09091-.2728.09091c-.5454.18181-1.0908.36364-1.6363.63636l-2.09087.90908 2.18177.63633c.1818-.0909.4546.00001.7273.09092z"/></g></svg>`
-  },
-  {
-    id: "biosynthesis",
-    name: "Biosynthesis",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g clip-rule="evenodd" fill-rule="evenodd"><path d="m4.29111 28.6025c.90712.9019.9071 2.3641-.00003 3.266l-.04646.0462c-.90713.9019-2.37788.9018-3.284994-.0001-.9071177-.9019-.9071038-2.3641.000031-3.266l.046453-.0462c.90714-.9019 2.37788-.9018 3.285.0001z" fill="#a4bcfd"/><path d="m15.2112 29.298c.9055.9035.9028 2.3658-.006 3.266l-6.43424 6.3741c-.90876.9002-2.3795.8976-3.28499-.0059-.90548-.9035-.90282-2.3658.00594-3.266l6.43429-6.3741c.9088-.9002 2.3795-.8976 3.285.0059z" fill="#6172f3"/><path d="m23.9431 40.2706c.7116-1.0613 2.1538-1.348 3.2212-.6405l.1394.0923c1.0674.7075 1.3558 2.1414.6442 3.2026-.7116 1.0613-2.1538 1.3481-3.2212.6406l-.1394-.0924c-1.0674-.7075-1.3558-2.1414-.6442-3.2026z" fill="#a4bcfd"/><path d="m39.2728 28.4638c.9072.9019.9072 2.3641 0 3.266l-3.159 3.1408c-.9072.9019-2.3779.9019-3.285 0s-.9071-2.3641 0-3.266l3.1591-3.1408c.9071-.9019 2.3778-.9019 3.2849 0z" fill="#6172f3"/><g fill="#444ce7"><path d="m39.3197 16.8473c.9071.9019.9071 2.3642 0 3.266l-23.3446 23.2098c-.9071.9019-2.3779.9019-3.285 0s-.9071-2.3641 0-3.266l23.3446-23.2098c.9071-.9019 2.3778-.9019 3.285 0z"/><path d="m34.905 9.71133c.9072.90187.9072 2.36417 0 3.26607l-13.426 13.3485c-.9071.9019-2.3779.9019-3.285 0s-.9071-2.3642 0-3.2661l13.4261-13.34847c.9071-.90189 2.3778-.90189 3.2849 0z"/><path d="m27.8187 5.18362c.9077.90128.9087 2.36353.0022 3.26603l-17.2588 17.18215c-.90647.9025-2.37721.9035-3.28495.0022-.90773-.9013-.90872-2.3635-.00221-3.266l17.25876-17.18218c.9065-.9025 2.3772-.90348 3.285-.0022z"/></g><path d="m10.7276 10.6841c.9056.9035.9031 2.3657-.0056 3.266l-6.75949 6.6974c-.90869.9003-2.37943.8978-3.28499-.0056-.905563-.9035-.903032-2.3657.005654-3.2661l6.759476-6.6973c.90868-.90034 2.37942-.89783 3.28495.0056z" fill="#6172f3"/><path d="m14.8678 4.00024c1.2828 0 2.3228 1.03397 2.3228 2.30944v.23094c0 1.27546-1.04 2.30943-2.3228 2.30943-1.2829 0-2.3229-1.03397-2.3229-2.30943v-.23094c0-1.27547 1.04-2.30944 2.3229-2.30944z" fill="#a4bcfd"/></g></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g clip-rule="evenodd" fill="#fff" fill-rule="evenodd"><path d="m4.29111 28.6025c.90712.9019.9071 2.3641-.00003 3.266l-.04646.0462c-.90713.9019-2.37788.9018-3.284994-.0001-.9071177-.9019-.9071038-2.3641.000031-3.266l.046453-.0462c.90714-.9019 2.37788-.9018 3.285.0001z" opacity=".5"/><path d="m15.2112 29.298c.9055.9035.9028 2.3658-.006 3.266l-6.43424 6.3741c-.90876.9002-2.3795.8976-3.28499-.0059-.90548-.9035-.90282-2.3658.00594-3.266l6.43429-6.3741c.9088-.9002 2.3795-.8976 3.285.0059z" opacity=".7"/><path d="m23.9431 40.2706c.7116-1.0613 2.1538-1.348 3.2212-.6405l.1394.0923c1.0674.7075 1.3558 2.1414.6442 3.2026-.7116 1.0613-2.1538 1.3481-3.2212.6406l-.1394-.0924c-1.0674-.7075-1.3558-2.1414-.6442-3.2026z" opacity=".5"/><path d="m39.2728 28.4638c.9072.9019.9072 2.3641 0 3.266l-3.159 3.1408c-.9072.9019-2.3779.9019-3.285 0s-.9071-2.3641 0-3.266l3.1591-3.1408c.9071-.9019 2.3778-.9019 3.2849 0z" opacity=".7"/><path d="m39.3197 16.8473c.9071.9019.9071 2.3642 0 3.266l-23.3446 23.2098c-.9071.9019-2.3779.9019-3.285 0s-.9071-2.3641 0-3.266l23.3446-23.2098c.9071-.9019 2.3778-.9019 3.285 0z"/><path d="m34.905 9.71133c.9072.90187.9072 2.36417 0 3.26607l-13.426 13.3485c-.9071.9019-2.3779.9019-3.285 0s-.9071-2.3642 0-3.2661l13.4261-13.34847c.9071-.90189 2.3778-.90189 3.2849 0z"/><path d="m27.8187 5.18362c.9077.90128.9087 2.36353.0022 3.26603l-17.2588 17.18215c-.90647.9025-2.37721.9035-3.28495.0022-.90773-.9013-.90872-2.3635-.00221-3.266l17.25876-17.18218c.9065-.9025 2.3772-.90348 3.285-.0022z"/><path d="m10.7276 10.6841c.9056.9035.9031 2.3657-.0056 3.266l-6.75949 6.6974c-.90869.9003-2.37943.8978-3.28499-.0056-.905563-.9035-.903032-2.3657.005654-3.2661l6.759476-6.6973c.90868-.90034 2.37942-.89783 3.28495.0056z" opacity=".7"/><path d="m14.8678 4.00024c1.2828 0 2.3228 1.03397 2.3228 2.30944v.23094c0 1.27546-1.04 2.30943-2.3228 2.30943-1.2829 0-2.3229-1.03397-2.3229-2.30943v-.23094c0-1.27547 1.04-2.30944 2.3229-2.30944z" opacity=".5"/></g></svg>`
-  },
-  {
-    id: "boltshift",
-    name: "Boltshift",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m20 44c11.0457 0 20-8.9543 20-20s-8.9543-20-20-20c-11.04572 0-20 8.9543-20 20s8.95428 20 20 20zm6.2393-30.6832c.3037-1.0787-.7432-1.7167-1.6993-1.0355l-13.3469 9.5083c-1.0369.7387-.8738 2.2104.245 2.2104h3.5146v-.0272h6.8498l-5.5813 1.9693-2.4605 8.7411c-.3037 1.0788.7431 1.7167 1.6993 1.0355l13.3469-9.5082c1.0369-.7387.8737-2.2105-.245-2.2105h-5.3298z" fill="#155eef" fill-rule="evenodd"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m20 44c11.0457 0 20-8.9543 20-20s-8.9543-20-20-20c-11.04572 0-20 8.9543-20 20s8.95428 20 20 20zm6.2393-30.6832c.3037-1.0787-.7432-1.7167-1.6993-1.0355l-13.3469 9.5083c-1.0369.7387-.8738 2.2104.245 2.2104h3.5146v-.0272h6.8498l-5.5813 1.9693-2.4605 8.7411c-.3037 1.0788.7431 1.7167 1.6993 1.0355l13.3469-9.5082c1.0369-.7387.8737-2.2105-.245-2.2105h-5.3298z" fill="#fff" fill-rule="evenodd"/></svg>`
-  },
-  {
-    id: "buildingblocks",
-    name: "BuildingBlocks",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 37 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m12.8841 4.30945-6.8842 3.97574 6.8891 3.97661 6.8862-3.97575zm8.8919 7.44025-6.887 3.9762-.0007 7.9532 6.8877-3.9771zm2 11.4164-6.8879 3.9772 6.8889 3.9765 6.8871-3.9763zm8.8879 7.4416-6.8868 3.9761v7.9522l6.8868-3.9761zm-10.8868 11.9287v-7.9525l-6.8891-3.9766v7.9525zm-10.8888-18.8569-6.8883-3.9775v-7.9526l6.889 3.9765zm-.0003 4.6187-9.38814-5.4209c-.928127-.5359-1.49986-1.5262-1.49986-2.598v-11.99368c0-.71444.381106-1.37463.999789-1.73193l10.383811-5.996798c.9281-.5359626 2.0716-.5361538 2.9998-.000505l10.3922 5.996973c.619.3572 1.0004 1.01758 1.0004 1.73226v11.41638l9.888 5.7096c.6188.3573.9999 1.0175.9999 1.732v11.9937c0 1.0718-.5718 2.0621-1.5 2.598l-10.3868 5.9969c-.6187.3572-1.381.3572-1.9998.0001l-10.3891-5.9969c-.9283-.5358-1.5002-1.5263-1.5002-2.5982z" fill="#155eef" fill-rule="evenodd"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 37 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m12.8841 4.30945-6.8842 3.97574 6.8891 3.97661 6.8862-3.97575zm8.8919 7.44025-6.887 3.9762-.0007 7.9532 6.8877-3.9771zm2 11.4164-6.8879 3.9772 6.8889 3.9765 6.8871-3.9763zm8.8879 7.4416-6.8868 3.9761v7.9522l6.8868-3.9761zm-10.8868 11.9287v-7.9525l-6.8891-3.9766v7.9525zm-10.8888-18.8569-6.8883-3.9775v-7.9526l6.889 3.9765zm-.0003 4.6187-9.38814-5.4209c-.928127-.5359-1.49986-1.5262-1.49986-2.598v-11.99368c0-.71444.381106-1.37463.999789-1.73193l10.383811-5.996798c.9281-.5359626 2.0716-.5361538 2.9998-.000505l10.3922 5.996973c.619.3572 1.0004 1.01758 1.0004 1.73226v11.41638l9.888 5.7096c.6188.3573.9999 1.0175.9999 1.732v11.9937c0 1.0718-.5718 2.0621-1.5 2.598l-10.3868 5.9969c-.6187.3572-1.381.3572-1.9998.0001l-10.3891-5.9969c-.9283-.5358-1.5002-1.5263-1.5002-2.5982z" fill="#155eef" fill-rule="evenodd"/></svg>`
-  },
-  {
-    id: "calescence",
-    name: "Calescence",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 36 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g clip-rule="evenodd" fill="#1570ef" fill-rule="evenodd"><path d="m35.3721 14v8.0492h-9.9698v-2.2927z"/><path d="m35.3699 14.0001-9.9698 5.7565-7.3513-4.2436v-11.513z" opacity=".9"/><path d="m18.0512 4v11.513l-7.349 4.2436-9.969778-5.7565z" opacity=".8"/><path d="m10.7002 19.7565v8.4868l-9.969731 5.756v-19.9993z" opacity=".7"/><path d="m18.0492 32.4871v11.5129l-17.318731-10.0006 9.969731-5.756z" opacity=".6"/><path d="m35.3699 33.9994-17.3211 10.0006v-11.5129l7.3513-4.2437z" opacity=".5"/><path d="m35.3721 25.9507v8.0487l-9.9698-5.756v-2.2927z" opacity=".4"/></g></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 36 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g clip-rule="evenodd" fill="#fff" fill-rule="evenodd"><path d="m35.3721 14v8.0492h-9.9698v-2.2927z"/><path d="m35.3699 14.0001-9.9698 5.7565-7.3513-4.2436v-11.513z" opacity=".9"/><path d="m18.0512 4v11.513l-7.349 4.2436-9.969778-5.7565z" opacity=".8"/><path d="m10.7002 19.7565v8.4868l-9.969731 5.756v-19.9993z" opacity=".7"/><path d="m18.0492 32.4871v11.5129l-17.318731-10.0006 9.969731-5.756z" opacity=".6"/><path d="m35.3699 33.9994-17.3211 10.0006v-11.5129l7.3513-4.2437z" opacity=".5"/><path d="m35.3721 25.9507v8.0487l-9.9698-5.756v-2.2927z" opacity=".4"/></g></svg>`
-  },
-  {
-    id: "capsule",
-    name: "Capsule",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="18" fill="#1570ef" r="14"/><circle cx="26" cy="30" fill="#53b1fd" r="14"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><circle cx="14" cy="18" opacity=".7" r="14"/><circle cx="26" cy="30" opacity=".7" r="14"/></g></svg>`
-  },
-  {
-    id: "constellation",
-    name: "Constellation",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 44 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m16 8 5.0912 10.9088 10.9088 5.0912-10.9088 5.0912-5.0912 10.9088-5.0912-10.9088-10.9088-5.0912 10.9088-5.0912z"/><path d="m20.0469 31.3286 6.3539-1.0932 3.6 9.7646 3.6-9.7646 10.2565 1.7646-6.6564-8 6.6564-8-10.2565 1.7646-3.6-9.7646-3.6 9.7646-6.3539-1.0932 1.0442 2.2374 10.9088 5.0912-10.9088 5.0912z" opacity=".5"/></g></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 44 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m16 8 5.0912 10.9088 10.9088 5.0912-10.9088 5.0912-5.0912 10.9088-5.0912-10.9088-10.9088-5.0912 10.9088-5.0912z"/><path d="m20.0469 31.3286 6.3539-1.0932 3.6 9.7646 3.6-9.7646 10.2565 1.7646-6.6564-8 6.6564-8-10.2565 1.7646-3.6-9.7646-3.6 9.7646-6.3539-1.0932 1.0442 2.2374 10.9088 5.0912-10.9088 5.0912z" opacity=".5"/></g></svg>`
-  },
-  {
-    id: "codecraft",
-    name: "Codecraft",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m0 9c0-2.76142 2.23858-5 5-5h10c2.7614 0 5 2.23858 5 5v9.8192c.0002.06.0003.1203.0003.1808 0 2.7575 2.2322 4.9936 4.9881 5h.0116 10c2.7614 0 5 2.2386 5 5v10c0 2.7614-2.2386 5-5 5h-10c-2.7614 0-5-2.2386-5-5v-10c0-.0139.0001-.0277.0002-.0416-.0224-2.7422-2.2523-4.9584-4.9999-4.9584-.0129 0-.0258 0-.0387 0h-9.9616c-2.76142 0-5-2.2386-5-5z" fill="#155eef"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m0 9c0-2.76142 2.23858-5 5-5h10c2.7614 0 5 2.23858 5 5v9.8192c.0002.06.0003.1203.0003.1808 0 2.7575 2.2322 4.9936 4.9881 5h.0116 10c2.7614 0 5 2.2386 5 5v10c0 2.7614-2.2386 5-5 5h-10c-2.7614 0-5-2.2386-5-5v-10c0-.0139.0001-.0277.0002-.0416-.0224-2.7422-2.2523-4.9584-4.9999-4.9584-.0129 0-.0258 0-.0387 0h-9.9616c-2.76142 0-5-2.2386-5-5z" fill="#155eef"/></svg>`
-  },
-  {
-    id: "command-r",
-    name: "Command+R",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 32 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m18.6667 30.6667c7.3638 0 13.3333-5.9696 13.3333-13.3334 0-7.36376-5.9695-13.3333-13.3333-13.3333h-18.6667v26.6667z" fill="#155eef"/><path d="m0 4 32 40h-21.3333l-10.6667-13.3333z" fill="#2e90fa"/><path d="m21.1488 30.436c-.8042.1515-1.6339.2307-2.4821.2307h-18.6667v-26.6667z" fill="#53b1fd"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 32 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m18.6667 30.6667c7.3638 0 13.3333-5.9696 13.3333-13.3334 0-7.36376-5.9695-13.3333-13.3333-13.3333h-18.6667v26.6667z" opacity=".7"/><path d="m0 4 32 40h-21.3333l-10.6667-13.3333z" opacity=".7"/><path d="m21.1488 30.436c-.8042.1515-1.6339.2307-2.4821.2307h-18.6667v-26.6667z" opacity=".7"/></g></svg>`
-  },
-  {
-    id: "contrast-ai",
-    name: "ContrastAI",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m20 4c11.0457 0 20 8.9543 20 20s-8.9543 20-20 20-20-8.9543-20-20 8.9543-20 20-20zm15 20c0 8.2843-6.7157 15-15 15v-30c8.2843 0 15 6.7157 15 15z" fill="#155eef" fill-rule="evenodd"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m20 4c11.0457 0 20 8.9543 20 20s-8.9543 20-20 20-20-8.9543-20-20 8.9543-20 20-20zm15 20c0 8.2843-6.7157 15-15 15v-30c8.2843 0 15 6.7157 15 15z" fill="#fff" fill-rule="evenodd"/></svg>`
-  },
-  {
-    id: "convergence",
-    name: "Convergence",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 42 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m22.1017 20.8596 9.8995-9.8994-2.1213-2.12137-7.3389 7.33887v-13.1777h-3v13.1777l-7.3388-7.33887-2.1213 2.12137 9.8995 9.8994 1.0606 1.0607zm2.1207 2.1214 9.8995-9.8995 2.1213 2.1213-7.3388 7.3388h13.0956v3h-13.0956l7.3388 7.3389-2.1213 2.1213-9.8995-9.8995-1.0607-1.0607zm-16.26224 12.0208 9.89944-9.8995 1.0607-1.0607-1.0607-1.0606-9.89944-9.8995-2.12133 2.1213 7.33887 7.3388h-13.17574688v3h13.17574688l-7.33887 7.3389zm12.02024-7.7782-9.8995 9.8995 2.1213 2.1213 7.3388-7.3388v13.0944h3v-13.0944l7.3389 7.3388 2.1213-2.1213-9.8995-9.8995-1.0607-1.0607z" fill="#155eef" fill-rule="evenodd"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 42 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m22.1017 20.8596 9.8995-9.8994-2.1213-2.12137-7.3389 7.33887v-13.1777h-3v13.1777l-7.3388-7.33887-2.1213 2.12137 9.8995 9.8994 1.0606 1.0607zm2.1207 2.1214 9.8995-9.8995 2.1213 2.1213-7.3388 7.3388h13.0956v3h-13.0956l7.3388 7.3389-2.1213 2.1213-9.8995-9.8995-1.0607-1.0607zm-16.26224 12.0208 9.89944-9.8995 1.0607-1.0607-1.0607-1.0606-9.89944-9.8995-2.12133 2.1213 7.33887 7.3388h-13.17574688v3h13.17574688l-7.33887 7.3389zm12.02024-7.7782-9.8995 9.8995 2.1213 2.1213 7.3388-7.3388v13.0944h3v-13.0944l7.3389 7.3388 2.1213-2.1213-9.8995-9.8995-1.0607-1.0607z" fill="#155eef" fill-rule="evenodd"/></svg>`
-  },
-  {
-    id: "core-os",
-    name: "CoreOS",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 42 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m15.2286 4.99951c-3.2154 0-6.18655 1.71539-7.79425 4.5l-5.7735 9.99999c-1.6076941 2.7846-1.607697 6.2154 0 9l5.7735 10c1.6077 2.7846 4.57885 4.5 7.79425 4.5h11.547c3.2154 0 6.1865-1.7154 7.7942-4.5l5.7735-10c1.6077-2.7846 1.6077-6.2154 0-9l-5.7735-9.99999c-1.6077-2.78461-4.5788-4.5-7.7942-4.5zm11.547 5.99999h-7.2169c-1.1547 0-1.8762 1.2499-1.298 2.2494 1.784 3.0838 3.5722 6.1653 5.3536 9.2506.5359.9282.5359 2.0718 0 3-1.7814 3.0854-3.5696 6.1668-5.3536 9.2506-.5782.9995.1433 2.2494 1.298 2.2494h7.2169c1.0718 0 2.0622-.5718 2.5981-1.5l5.7735-10c.5359-.9282.5359-2.0718 0-3l-5.7735-10c-.5359-.9282-1.5263-1.5-2.5981-1.5z" fill="#155eef" fill-rule="evenodd"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 42 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m15.2286 4.99951c-3.2154 0-6.18655 1.71539-7.79425 4.5l-5.7735 9.99999c-1.6076941 2.7846-1.607697 6.2154 0 9l5.7735 10c1.6077 2.7846 4.57885 4.5 7.79425 4.5h11.547c3.2154 0 6.1865-1.7154 7.7942-4.5l5.7735-10c1.6077-2.7846 1.6077-6.2154 0-9l-5.7735-9.99999c-1.6077-2.78461-4.5788-4.5-7.7942-4.5zm11.547 5.99999h-7.2169c-1.1547 0-1.8762 1.2499-1.298 2.2494 1.784 3.0838 3.5722 6.1653 5.3536 9.2506.5359.9282.5359 2.0718 0 3-1.7814 3.0854-3.5696 6.1668-5.3536 9.2506-.5782.9995.1433 2.2494 1.298 2.2494h7.2169c1.0718 0 2.0622-.5718 2.5981-1.5l5.7735-10c.5359-.9282.5359-2.0718 0-3l-5.7735-10c-.5359-.9282-1.5263-1.5-2.5981-1.5z" fill="#155eef" fill-rule="evenodd"/></svg>`
-  },
-  {
-    id: "cubekit",
-    name: "Cubekit",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m0 14.5264v18.9473l17.8947-12.2437v-18.94741z" fill="#155eef" opacity=".5"/><path d="m0 33.4737v-18.9474l17.8947 12.2438v18.9474z" fill="#1570ef" opacity=".5"/><path d="m40 14.5263v18.9474l-17.8947-12.2438v-18.94737z" fill="#155eef" opacity=".5"/><path d="m40 33.4737v-18.9474l-17.8947 12.2438v18.9474z" fill="#1570ef" opacity=".5"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m0 14.5264v18.9473l17.8947-12.2437v-18.94741z" opacity=".5"/><path d="m0 33.4737v-18.9474l17.8947 12.2438v18.9474z" opacity=".5"/><path d="m40 14.5263v18.9474l-17.8947-12.2438v-18.94737z" opacity=".5"/><path d="m40 33.4737v-18.9474l-17.8947 12.2438v18.9474z" opacity=".5"/></g></svg>`
-  },
-  {
-    id: "europa",
-    name: "Europa",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m28.6446 39.168c-.6032 1.3404-1.353 2.6531-2.2519 3.7888 7.4581-2.5137 12.9483-9.3054 13.5527-17.4568h-2.6549c-3.2399 0-5.8424 2.5861-6.369 5.7829-.4855 2.9468-1.2621 5.6301-2.2769 7.8851z"/><path d="m22.7724 25.5c3.3921 0 6.167 2.8299 5.5439 6.1643-1.3533 7.2424-4.5667 12.3357-8.3155 12.3357-4.7435 0-8.6299-8.1549-8.975-18.5z"/><path d="m30.9904 17.1502c.4961 3.2267 3.1106 5.8498 6.3752 5.8498h2.6107c-.4123-8.3729-5.9735-15.39183-13.5836-17.95683.8989 1.13575 1.6487 2.44843 2.2519 3.78878 1.0643 2.36505 1.8666 5.20115 2.3458 8.31825z"/><path d="m28.4165 16.8957c.5674 3.3176-2.1954 6.1043-5.5612 6.1043h-11.8434c.2344-10.5811 4.1693-19 8.9889-19 3.8447 0 7.1263 5.35721 8.4157 12.8957z"/><path d="m8.51131 23c.11359-5.4083 1.14536-10.3894 2.84579-14.16805.6031-1.34035 1.3529-2.65303 2.2519-3.78878-7.61011 2.565-13.171316 9.58393-13.5836094 17.95683z"/><path d="m.0562286 25.5c.6043994 8.1514 6.0946514 14.9431 13.5527714 17.4568-.899-1.1357-1.6488-2.4484-2.2519-3.7888-1.6479-3.6619-2.66781-8.4531-2.83264-13.668z"/></g></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m28.6446 39.168c-.6032 1.3404-1.353 2.6531-2.2519 3.7888 7.4581-2.5137 12.9483-9.3054 13.5527-17.4568h-2.6549c-3.2399 0-5.8424 2.5861-6.369 5.7829-.4855 2.9468-1.2621 5.6301-2.2769 7.8851z"/><path d="m22.7724 25.5c3.3921 0 6.167 2.8299 5.5439 6.1643-1.3533 7.2424-4.5667 12.3357-8.3155 12.3357-4.7435 0-8.6299-8.1549-8.975-18.5z"/><path d="m30.9904 17.1502c.4961 3.2267 3.1106 5.8498 6.3752 5.8498h2.6107c-.4123-8.3729-5.9735-15.39183-13.5836-17.95683.8989 1.13575 1.6487 2.44843 2.2519 3.78878 1.0643 2.36505 1.8666 5.20115 2.3458 8.31825z"/><path d="m28.4165 16.8957c.5674 3.3176-2.1954 6.1043-5.5612 6.1043h-11.8434c.2344-10.5811 4.1693-19 8.9889-19 3.8447 0 7.1263 5.35721 8.4157 12.8957z"/><path d="m8.51131 23c.11359-5.4083 1.14536-10.3894 2.84579-14.16805.6031-1.34035 1.3529-2.65303 2.2519-3.78878-7.61011 2.565-13.171316 9.58393-13.5836094 17.95683z"/><path d="m.0562286 25.5c.6043994 8.1514 6.0946514 14.9431 13.5527714 17.4568-.899-1.1357-1.6488-2.4484-2.2519-3.7888-1.6479-3.6619-2.66781-8.4531-2.83264-13.668z"/></g></svg>`
-  },
-  {
-    id: "feather-dev",
-    name: "FeatherDev",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 44 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m36.3068 11.4224c-.4322-.4323-.8644-.8645-1.2967-1.2967-1.2966-1.38311-2.6797-2.76621-4.4086-3.63065-1.9882-1.03733-4.1493-.778-6.3104-.778-3.2849 0-11.4971 0-16.33798 0l3.28488 4.40865h19.6228c1.8153 0 3.3713.3458 4.8409 1.2967.2593.0864.5186.0864.6051 0z" fill="#53b1fd"/><path d="m39.9368 18.511c-.4322-.4322-.8645-.8645-1.2967-1.2967-1.2967-1.3831-2.6797-2.7662-4.4086-3.6306-1.9882-1.0374-4.1494-.778-6.3105-.778-2.8526 0-9.6817 0-14.5226 0l3.2849 4.4086h17.8939c1.8154 0 3.3714.3458 4.8409 1.2967.1729.0864.3458.0864.5187 0z" fill="#2e90fa"/><path d="m44 25.4263c-.4322-.4323-.8645-.8645-1.2967-1.2967-1.2966-1.3831-2.6797-2.7662-4.4086-3.6307-1.9882-1.0373-4.1493-.7779-6.3104-.7779-2.6798 0-8.558 0-13.3124 0l3.2848 4.4086h16.5973c1.8153 0 3.3713.3458 4.8409 1.2967.2593.0864.4322.1729.6051 0z" fill="#1570ef"/><path d="m7.60742 37.0961c.43222.4322.86444.8644 1.29666 1.2966 1.29662 1.3831 2.67972 2.7662 4.40862 3.6307 1.9882 1.0373 4.1493.778 6.3104.778h16.338l-3.2849-4.4087c-5.9646 0-15.3006 0-19.6228 0-1.8153 0-3.37132-.3457-4.84087-1.2966-.25933-.0865-.43222-.0865-.60511 0z" fill="#53b1fd"/><path d="m3.97656 30.0079c.43222.4323.86444.8645 1.29666 1.2967 1.29667 1.3831 2.67976 2.7662 4.40864 3.6307 1.98824 1.0373 4.14934.778 6.31044.778h14.5226l-3.2849-4.4087c-5.8782 0-13.9175 0-17.89391 0-1.81532 0-3.37132-.3458-4.84087-1.2967-.17289-.0864-.34577-.0864-.51866 0z" fill="#2e90fa"/><path d="m0 23.0058c.43222.4322.864441.8644 1.29666 1.2966 1.29666 1.3831 2.67977 2.7662 4.40866 3.6307 1.98821 1.0373 4.1493.778 6.31038.778h13.3124l-3.2849-4.4087c-5.7053 0-12.96657 0-16.59722 0-1.81533 0-3.37132-.3458-4.840874-1.2966-.259332-.0865-.432218-.0865-.605106 0z" fill="#1570ef"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 44 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m36.3068 11.4224c-.4322-.4323-.8644-.8645-1.2967-1.2967-1.2966-1.38311-2.6797-2.76621-4.4086-3.63065-1.9882-1.03733-4.1493-.778-6.3104-.778-3.2849 0-11.4971 0-16.33798 0l3.28488 4.40865h19.6228c1.8153 0 3.3713.3458 4.8409 1.2967.2593.0864.5186.0864.6051 0z" opacity=".5"/><path d="m39.9368 18.511c-.4322-.4322-.8645-.8645-1.2967-1.2967-1.2967-1.3831-2.6797-2.7662-4.4086-3.6306-1.9882-1.0374-4.1494-.778-6.3105-.778-2.8526 0-9.6817 0-14.5226 0l3.2849 4.4086h17.8939c1.8154 0 3.3714.3458 4.8409 1.2967.1729.0864.3458.0864.5187 0z" opacity=".7"/><path d="m44 25.4263c-.4322-.4323-.8645-.8645-1.2967-1.2967-1.2966-1.3831-2.6797-2.7662-4.4086-3.6307-1.9882-1.0373-4.1493-.7779-6.3104-.7779-2.6798 0-8.558 0-13.3124 0l3.2848 4.4086h16.5973c1.8153 0 3.3713.3458 4.8409 1.2967.2593.0864.4322.1729.6051 0z"/><path d="m7.60742 37.0961c.43222.4322.86444.8644 1.29666 1.2966 1.29662 1.3832 2.67972 2.7662 4.40862 3.6307 1.9882 1.0373 4.1493.778 6.3104.778h16.338l-3.2849-4.4087c-5.9646 0-15.3006 0-19.6228 0-1.8153 0-3.37132-.3457-4.84087-1.2966-.25933-.0865-.43222-.0865-.60511 0z" opacity=".5"/><path d="m3.97656 30.0079c.43222.4323.86444.8645 1.29666 1.2967 1.29667 1.3831 2.67976 2.7662 4.40864 3.6307 1.98824 1.0373 4.14934.778 6.31044.778h14.5226l-3.2849-4.4087c-5.8782 0-13.9175 0-17.89391 0-1.81532 0-3.37132-.3458-4.84087-1.2967-.17289-.0864-.34577-.0864-.51866 0z" opacity=".7"/><path d="m0 23.0058c.43222.4322.864441.8644 1.29666 1.2966 1.29666 1.3831 2.67977 2.7662 4.40866 3.6307 1.98821 1.0373 4.1493.778 6.31038.778h13.3124l-3.2849-4.4087c-5.7053 0-12.96657 0-16.59722 0-1.81533 0-3.37132-.3458-4.840874-1.2966-.259332-.0865-.432218-.0865-.605106 0z"/></g></svg>`
-  },
-  {
-    id: "flora-fauna",
-    name: "Flora&Fauna",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m13.7146 4c-2.2564 0-4.4203.89634-6.01579 2.49183l-7.69881 7.69877v3.524c0 2.4897 1.06944 4.7296 2.77401 6.2854-1.70457 1.5558-2.77401 3.7957-2.77401 6.2854v3.524l7.69881 7.6988c1.59549 1.5955 3.75939 2.4918 6.01579 2.4918 2.4897 0 4.7296-1.0694 6.2854-2.774 1.5558 1.7046 3.7957 2.774 6.2854 2.774 2.2564 0 4.4203-.8963 6.0158-2.4918l7.6988-7.6988v-3.524c0-2.4897-1.0694-4.7296-2.774-6.2854 1.7046-1.5558 2.774-3.7957 2.774-6.2854v-3.524l-7.6988-7.69877c-1.5955-1.59549-3.7594-2.49183-6.0158-2.49183-2.4897 0-4.7296 1.06944-6.2854 2.77401-1.5558-1.70457-3.7957-2.77401-6.2854-2.77401zm12.0442 20c-.0959-.0875-.19-.1774-.2822-.2696l-5.4766-5.4766-5.4766 5.4766c-.0922.0922-.1863.1821-.2822.2696.0959.0875.19.1774.2822.2696l5.4766 5.4766 5.4766-5.4766c.0922-.0922.1863-.1821.2822-.2696zm-3.5366 9.8094v1.683c0 2.244 1.8192 4.0632 4.0632 4.0632 1.0776 0 2.1111-.4281 2.8731-1.1901l6.3971-6.3971v-1.683c0-2.244-1.8192-4.0632-4.0632-4.0632-1.0776 0-2.1111.4281-2.8731 1.1901zm-4.4444 0-6.3971-6.3971c-.762-.762-1.79546-1.1901-2.87308-1.1901-2.24403 0-4.06318 1.8192-4.06318 4.0632v1.683l6.39706 6.3971c.762.762 1.7955 1.1901 2.8731 1.1901 2.244 0 4.0632-1.8192 4.0632-4.0632zm0-21.3018v1.683l-6.3971 6.3971c-.762.762-1.79546 1.1901-2.87308 1.1901-2.24403 0-4.06318-1.8192-4.06318-4.0632v-1.683l6.39706-6.39708c.762-.76199 1.7955-1.19007 2.8731-1.19007 2.244 0 4.0632 1.81915 4.0632 4.06315zm10.8415 8.0801-6.3971-6.3971v-1.683c0-2.244 1.8192-4.06315 4.0632-4.06315 1.0776 0 2.1111.42808 2.8731 1.19007l6.3971 6.39708v1.683c0 2.244-1.8192 4.0632-4.0632 4.0632-1.0776 0-2.1111-.4281-2.8731-1.1901z" fill="#155eef" fill-rule="evenodd"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m13.7146 4c-2.2564 0-4.4203.89634-6.01579 2.49183l-7.69881 7.69877v3.524c0 2.4897 1.06944 4.7296 2.77401 6.2854-1.70457 1.5558-2.77401 3.7957-2.77401 6.2854v3.524l7.69881 7.6988c1.59549 1.5955 3.75939 2.4918 6.01579 2.4918 2.4897 0 4.7296-1.0694 6.2854-2.774 1.5558 1.7046 3.7957 2.774 6.2854 2.774 2.2564 0 4.4203-.8963 6.0158-2.4918l7.6988-7.6988v-3.524c0-2.4897-1.0694-4.7296-2.774-6.2854 1.7046-1.5558 2.774-3.7957 2.774-6.2854v-3.524l-7.6988-7.69877c-1.5955-1.59549-3.7594-2.49183-6.0158-2.49183-2.4897 0-4.7296 1.06944-6.2854 2.77401-1.5558-1.70457-3.7957-2.77401-6.2854-2.77401zm12.0442 20c-.0959-.0875-.19-.1774-.2822-.2696l-5.4766-5.4766-5.4766 5.4766c-.0922.0922-.1863.1821-.2822.2696.0959.0875.19.1774.2822.2696l5.4766 5.4766 5.4766-5.4766c.0922-.0922.1863-.1821.2822-.2696zm-3.5366 9.8094v1.683c0 2.244 1.8192 4.0632 4.0632 4.0632 1.0776 0 2.1111-.4281 2.8731-1.1901l6.3971-6.3971v-1.683c0-2.244-1.8192-4.0632-4.0632-4.0632-1.0776 0-2.1111.4281-2.8731 1.1901zm-4.4444 0-6.3971-6.3971c-.762-.762-1.79546-1.1901-2.87308-1.1901-2.24403 0-4.06318 1.8192-4.06318 4.0632v1.683l6.39706 6.3971c.762.762 1.7955 1.1901 2.8731 1.1901 2.244 0 4.0632-1.8192 4.0632-4.0632zm0-21.3018v1.683l-6.3971 6.3971c-.762.762-1.79546 1.1901-2.87308 1.1901-2.24403 0-4.06318-1.8192-4.06318-4.0632v-1.683l6.39706-6.39708c.762-.76199 1.7955-1.19007 2.8731-1.19007 2.244 0 4.0632 1.81915 4.0632 4.06315zm10.8415 8.0801-6.3971-6.3971v-1.683c0-2.244 1.8192-4.06315 4.0632-4.06315 1.0776 0 2.1111.42808 2.8731 1.19007l6.3971 6.39708v1.683c0 2.244-1.8192 4.0632-4.0632 4.0632-1.0776 0-2.1111-.4281-2.8731-1.1901z" fill="#fff" fill-rule="evenodd"/></svg>`
-  },
-  {
-    id: "focal-point",
-    name: "FocalPoint",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m10.7788 6.1817 4.6901 17.5036v-19.24382c.3719-.08679.7478-.16322 1.1273-.22897v19.47459l5.2752-19.6871c.3801.03442.7572.07945 1.1309.13479l-5.3176 19.84571 10.5701-18.30794c.3443.15492.6835.31927 1.0172.49274l-10.6095 18.3763 15.1464-15.1465c.2731.25824.5389.52407.7971.7972l-15.1486 15.1487 18.3784-10.6108c.1734.3337.3377.6729.4926 1.0173l-18.3034 10.5675 19.8403-5.3162c.0553.3737.1003.7508.1347 1.1309l-19.6869 5.2751h19.4741c-.0658.3796-.1422.7554-.229 1.1273h-19.2481l17.507 4.691c-.1798.3443-.3693.6827-.5681 1.0149l-17.2257-4.6156 14.3874 8.3066c-.2723.2801-.5528.5522-.8411.8161l-14.1087-8.1457 10.6759 10.6758c-.3377.1973-.6817.385-1.0316.5628l-10.4426-10.4426 6.8421 11.8508c-.3746.1059-.7537.2012-1.1368.2855l-6.6825-11.5744 3.2219 12.0243c-.2872.0122-.5759.0184-.8661.0184-.0991 0-.198-.0007-.2967-.0022l-3.1483-11.7497v11.4569c-.3795-.0657-.7554-.1421-1.1273-.2289v-11.2261l-2.7759 10.36c-.3541-.1396-.7033-.289-1.0471-.4478l2.7337-10.2024-5.13175 8.8884c-.3177-.2034-.62928-.4156-.9344-.6361l5.09135-8.8186-7.1301 7.1302c-.2731-.2583-.53893-.5241-.79717-.7971l7.12787-7.1279-8.81599 5.0899c-.22059-.3051-.4328-.6167-.6363-.9344l8.89259-5.1341-10.20737 2.735c-.15888-.3438-.3083-.693-.44793-1.047l10.3599-2.776h-11.226124c-.086806-.3719-.163256-.7477-.22903-1.1273h11.452154l-11.74511583-3.1471c-.00145443-.0995-.00218417-.1991-.00218417-.2989 0-.2894.00613487-.5774.0182816-.8639l12.0258184 3.2224-11.57621-6.6836c.084291-.3832.179549-.7623.285427-1.1369l11.855683 6.8449-10.44698-10.447c.17774-.3499.36544-.6939.56273-1.0315l10.68025 10.6802-8.14896-14.1144c.26387-.2882.53605-.56863.81617-.84096l8.30809 14.38996-4.61634-17.22828c.33214-.1988.67064-.38826 1.01484-.56802z" fill="#155eef"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m10.7788 6.1817 4.6901 17.5036v-19.24382c.3719-.08679.7478-.16322 1.1273-.22897v19.47459l5.2752-19.6871c.3801.03442.7572.07945 1.1309.13479l-5.3176 19.84571 10.5701-18.30794c.3443.15492.6835.31927 1.0172.49274l-10.6095 18.3763 15.1464-15.1465c.2731.25824.5389.52407.7971.7972l-15.1486 15.1487 18.3784-10.6108c.1734.3337.3377.6729.4926 1.0173l-18.3034 10.5675 19.8403-5.3162c.0553.3737.1003.7508.1347 1.1309l-19.6869 5.2751h19.4741c-.0658.3796-.1422.7554-.229 1.1273h-19.2481l17.507 4.691c-.1798.3443-.3693.6827-.5681 1.0149l-17.2257-4.6156 14.3874 8.3066c-.2723.2801-.5528.5522-.8411.8161l-14.1087-8.1457 10.6759 10.6758c-.3377.1973-.6817.385-1.0316.5628l-10.4426-10.4426 6.8421 11.8508c-.3746.1059-.7537.2012-1.1368.2855l-6.6825-11.5744 3.2219 12.0243c-.2872.0122-.5759.0184-.8661.0184-.0991 0-.198-.0007-.2967-.0022l-3.1483-11.7497v11.4569c-.3795-.0657-.7554-.1421-1.1273-.2289v-11.2261l-2.7759 10.36c-.3541-.1396-.7033-.289-1.0471-.4478l2.7337-10.2024-5.13174 8.8884c-.31771-.2034-.62929-.4156-.93441-.6361l5.09135-8.8186-7.1301 7.1302c-.2731-.2583-.53893-.5241-.79717-.7971l7.12787-7.1279-8.81599 5.0899c-.22059-.3051-.4328-.6167-.6363-.9344l8.89259-5.1341-10.20737 2.735c-.15888-.3438-.3083-.693-.44793-1.047l10.3599-2.776h-11.226124c-.086806-.3719-.163256-.7477-.22903-1.1273h11.452154l-11.74511583-3.1471c-.00145443-.0995-.00218417-.1991-.00218417-.2989 0-.2894.00613486-.5774.0182816-.8639l12.0258184 3.2224-11.57621-6.6836c.084291-.3832.179549-.7623.285427-1.1369l11.855683 6.8449-10.44698-10.447c.17774-.3499.36544-.6939.56273-1.0315l10.68025 10.6802-8.14896-14.1144c.26387-.2882.53605-.56863.81617-.84096l8.30809 14.38996-4.61634-17.22828c.33214-.1988.67064-.38826 1.01484-.56802z" fill="#fff"/></svg>`
-  },
-  {
-    id: "foresight",
-    name: "Foresight",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 31 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#444ce7"><path d="m-.00195312 17.8433 30.90545312-17.8433-.8189 12.6994-26.32058 15.1961z"/><path d="m3.76367 27.8951 21.73573-12.5492-.8189 12.6994-17.15086 9.902z" opacity=".5"/><path d="m7.52734 37.9477 12.56596-7.255-.8189 12.6994-7.9811 4.6079z" opacity=".25"/></g></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 31 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m-.00195312 17.8433 30.90545312-17.8433-.8189 12.6994-26.32058 15.1961z"/><path d="m3.76367 27.8951 21.73573-12.5492-.8189 12.6994-17.15086 9.902z" opacity=".5"/><path d="m7.52734 37.9477 12.56596-7.255-.8189 12.6994-7.9811 4.6079z" opacity=".25"/></g></svg>`
-  },
-  {
-    id: "galileo",
-    name: "Galileo",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m29.5411 6.41772c2.6913 5.27688 4.209 11.25228 4.209 17.58218s-1.5177 12.3054-4.2091 17.5823c6.2304-3.3881 10.4593-9.9914 10.4593-17.5823s-4.2289-14.19404-10.4592-17.58218z" fill="#6172f3"/><path d="m20.5481 5.99826c-.9047-1.28153-2.4457-1.9717-3.9913-1.70349-9.40496 1.63214-16.5568 9.83343-16.5568 19.70503 0 9.8717 7.1518 18.0729 16.5567 19.7051 1.5456.2682 3.0867-.4219 3.9913-1.7035 3.5923-5.0889 5.7025-11.2988 5.7025-18.0016 0-6.7027-2.1101-12.9126-5.7024-18.00154z" fill="#444ce7"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m29.5411 6.41772c2.6913 5.27688 4.209 11.25228 4.209 17.58218s-1.5177 12.3054-4.2091 17.5823c6.2304-3.3881 10.4593-9.9914 10.4593-17.5823s-4.2289-14.19404-10.4592-17.58218z" opacity=".7"/><path d="m20.5481 5.99826c-.9047-1.28153-2.4457-1.9717-3.9913-1.70349-9.40496 1.63214-16.5568 9.83343-16.5568 19.70503 0 9.8717 7.1518 18.0729 16.5567 19.7051 1.5456.2682 3.0867-.4219 3.9913-1.7035 3.5923-5.0889 5.7025-11.2988 5.7025-18.0016 0-6.7027-2.1101-12.9126-5.7024-18.00154z"/></g></svg>`
-  },
-  {
-    id: "global-bank",
-    name: "GlobalBank",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m27.6627 4h-15.3253l-12.3374 12.3373v15.3253l12.3374 12.3374h15.3253l12.3373-12.3374v-15.3253zm-13.2049 27.8554-7.90357-7.9036 7.90357-7.9036c2.988-2.988 7.9037-2.988 10.8916 0l7.9036 7.9036-7.9036 7.9036c-2.9879 2.988-7.8072 2.988-10.8916 0z" fill="#444ce7"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m27.6627 4h-15.3253l-12.3374 12.3373v15.3253l12.3374 12.3374h15.3253l12.3373-12.3374v-15.3253zm-13.2049 27.8554-7.90357-7.9036 7.90357-7.9036c2.988-2.988 7.9037-2.988 10.8916 0l7.9036 7.9036-7.9036 7.9036c-2.9879 2.988-7.8072 2.988-10.8916 0z" fill="#fff"/></svg>`
-  },
-  {
-    id: "hexsmith",
-    name: "Hexsmith",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m9.72461 41.7983h18.49589c1.2717 0 2.4469-.6785 3.0827-1.7798l4.1102-7.1191h-20.5481z" opacity=".7"/><path d="m25.1445 15.1015h-20.55661l4.11021-7.11909c.63585-1.10133 1.811-1.77977 3.0827-1.77977h18.4959z" opacity=".4"/><path d="m39.5272 25.7801c.6358-1.1014.6358-2.4582 0-3.5596l-4.1102-7.1191-5.1378 8.8989h-20.55068l5.13718 8.8989h20.5481l.0016-.0027.0016.0027z" opacity=".4"/><path d="m14.8634 32.8992-5.13775-8.8988-5.13776 8.8988 5.13776 8.8989z"/><path d="m25.1445 15.1014h-20.55593l-4.108166 7.1192c-.635516 1.1013-.635318 2.458.000521 3.5591l4.111125 7.1195 5.13775-8.8989h20.55l.0013-.0021z" opacity=".7"/><path d="m35.4181 15.1015-5.1378-8.89886-5.1377 8.89886 5.1377 8.8989z"/></g></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m9.72461 41.7983h18.49589c1.2717 0 2.4469-.6785 3.0827-1.7798l4.1102-7.1191h-20.5481z" opacity=".7"/><path d="m25.1445 15.1015h-20.55661l4.11021-7.11909c.63585-1.10133 1.811-1.77977 3.0827-1.77977h18.4959z" opacity=".4"/><path d="m39.5272 25.7801c.6358-1.1013.6358-2.4582 0-3.5596l-4.1102-7.1191-5.1378 8.8989h-20.55068l5.13718 8.8989h20.5481l.0016-.0027.0016.0027z" opacity=".4"/><path d="m14.8634 32.8992-5.13775-8.8988-5.13776 8.8988 5.13776 8.8989z"/><path d="m25.1445 15.1014h-20.55593l-4.108166 7.1192c-.635516 1.1013-.635318 2.458.000521 3.5591l4.111125 7.1195 5.13775-8.8989h20.55l.0013-.0022z" opacity=".7"/><path d="m35.4181 15.1015-5.1378-8.89886-5.1377 8.89886 5.1377 8.8989z"/></g></svg>`
-  },
-  {
-    id: "hourglass",
-    name: "Hourglass",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 30 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m0 41.2222c0 1.5341 1.24365 2.7778 2.77778 2.7778h24.44442c1.5341 0 2.7778-1.2437 2.7778-2.7778v-7.2222c0-8.2843-6.7157-15-15-15-8.28427 0-15 6.7157-15 15z" fill="#1570ef"/><path d="m0 6.77778c0-1.53413 1.24365-2.77778 2.77778-2.77778h24.44442c1.5341 0 2.7778 1.24365 2.7778 2.77778v7.22222c0 8.2843-6.7157 15-15 15-8.28427 0-15-6.7157-15-15z" fill="#53b1fd" opacity=".5"/></svg>`,
-    darkSvg: `<svg width="100%" height="100%" viewBox="0 0 30 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path opacity="0.7" d="M0 41.2222C0 42.7563 1.24365 44 2.77778 44H27.2222C28.7563 44 30 42.7563 30 41.2222V34C30 25.7157 23.2843 19 15 19C6.71573 19 0 25.7157 0 34V41.2222Z" fill="white"/><path opacity="0.7" d="M0 6.77778C0 5.24365 1.24365 4 2.77778 4H27.2222C28.7563 4 30 5.24365 30 6.77778V14C30 22.2843 23.2843 29 15 29C6.71573 29 0 22.2843 0 14V6.77778Z" fill="white"/></svg>`
-  },
-  {
-    id: "kintsugi",
-    name: "Kintsugi",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m20 4 4.2861 9.6525 9.856-3.79464-3.7946 9.85604 9.6525 4.2861-9.6525 4.2861 3.7946 9.856-9.856-3.7946-4.2861 9.6525-4.2861-9.6525-9.85604 3.7946 3.79469-9.856-9.65255-4.2861 9.65255-4.2861-3.79469-9.85604 9.85604 3.79464z" fill="#155eef"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m20 4 4.2861 9.6525 9.856-3.79464-3.7946 9.85604 9.6525 4.2861-9.6525 4.2861 3.7946 9.856-9.856-3.7946-4.2861 9.6525-4.2861-9.6525-9.85604 3.7946 3.79469-9.856-9.65255-4.2861 9.65255-4.2861-3.79469-9.85604 9.85604 3.79464z" fill="#155eef"/></svg>`
-  },
-  {
-    id: "layers",
-    name: "Layers",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m5.03741 15.4637c.7506-2.8008 3.62961-5.67985 6.43049-6.43044l17.4617-4.67957c2.8009-.7506 4.4629.91146 3.7123 3.71231l-4.6795 17.4617c-.7506 2.8009-3.6297 5.6799-6.4305 6.4305l-17.46175 4.6796c-2.80085.7505-4.462904-.9115-3.712306-3.7124z" opacity=".7"/><path d="m12.0355 22.4642c.7506-2.8008 3.6296-5.6799 6.4304-6.4305l17.4617-4.6795c2.8009-.7506 4.4629.9114 3.7123 3.7123l-4.6795 17.4617c-.7506 2.8009-3.6296 5.6799-6.4305 6.4305l-17.4617 4.6795c-2.80085.7506-4.46291-.9114-3.71231-3.7123z" opacity=".7"/></g></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m5.03741 15.4637c.7506-2.8008 3.62961-5.67985 6.43049-6.43044l17.4617-4.67957c2.8009-.7506 4.4629.91146 3.7123 3.71231l-4.6795 17.4617c-.7506 2.8009-3.6297 5.6799-6.4305 6.4305l-17.46175 4.6795c-2.80085.7506-4.462904-.9114-3.712306-3.7123z" opacity=".7"/><path d="m12.0355 22.4642c.7506-2.8008 3.6296-5.6799 6.4304-6.4305l17.4617-4.6795c2.8009-.7506 4.4629.9114 3.7123 3.7123l-4.6795 17.4617c-.7506 2.8009-3.6296 5.6799-6.4305 6.4305l-17.4617 4.6795c-2.80085.7506-4.46291-.9114-3.71231-3.7123z" opacity=".7"/></g></svg>`
-  },
-  {
-    id: "lightspeed",
-    name: "Lightspeed",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 48 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m0 24c0 6.6274 5.37258 12 12 12v-12c0 6.6274 5.3726 12 12 12v-12c0 6.6274 5.3726 12 12 12s12-5.3726 12-12-5.3726-12-12-12-12 5.3726-12 12v-12c-6.6274 0-12 5.3726-12 12v-12c-6.62742 0-12 5.3726-12 12z" fill="#155eef"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 48 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m0 24c0 6.6274 5.37258 12 12 12v-12c0 6.6274 5.3726 12 12 12v-12c0 6.6274 5.3726 12 12 12s12-5.3726 12-12-5.3726-12-12-12-12 5.3726-12 12v-12c-6.6274 0-12 5.3726-12 12v-12c-6.62742 0-12 5.3726-12 12z" fill="#155eef"/></svg>`
-  },
-  {
-    id: "luminescence",
-    name: "Luminescence",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m32.3008 36h-.1015c-.0261.0402-.0523.0804-.0787.1204-2.7604 1.8201-6.0668 2.8794-9.6206 2.8794-9.665 0-17.5-7.835-17.5-17.5 0-3.5538 1.05931-6.8602 2.87939-9.6206.04009-.0264.08029-.0527.12061-.0788v-.1017c-.04056.0599-.08077.1201-.12061.1805-4.7469 3.1299-7.87939 8.5094-7.87939 14.6206 0 9.665 7.83502 17.5 17.5 17.5 6.1112 0 11.4907-3.1325 14.6206-7.8794.0603-.0398.1204-.0799.1802-.1204z"/><g opacity=".5"><path d="m40.0003 21.5c0 6.1112-3.1325 11.4907-7.8794 14.6206 1.8201-2.7604 2.8794-6.0668 2.8794-9.6206 0-9.665-7.835-17.5-17.5-17.5-3.5538 0-6.8602 1.0593-9.6206 2.8794 3.1299-4.74691 8.5094-7.8794 14.6206-7.8794 9.665 0 17.5 7.835 17.5 17.5z"/><path d="m32.0003 36.1994c.0403-.0261.0805-.0524.1206-.0788-.0398.0604-.08.1206-.1206.1805z"/><path d="m7.80088 12c.02611-.0403.05238-.0805.07882-.1206-.06043.0398-.12059.08-.18048.1206z"/></g></g></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m32.3008 36h-.1015c-.0261.0402-.0523.0804-.0787.1204-2.7604 1.8201-6.0668 2.8794-9.6206 2.8794-9.665 0-17.5-7.835-17.5-17.5 0-3.5538 1.05931-6.8602 2.87939-9.6206.04009-.0264.08029-.0527.12061-.0788v-.1017c-.04056.0599-.08077.1201-.12061.1805-4.7469 3.1299-7.87939 8.5094-7.87939 14.6206 0 9.665 7.83502 17.5 17.5 17.5 6.1112 0 11.4907-3.1325 14.6206-7.8794.0603-.0398.1204-.0799.1802-.1204z"/><g opacity=".5"><path d="m40.0003 21.5c0 6.1112-3.1325 11.4907-7.8794 14.6206 1.8201-2.7604 2.8794-6.0668 2.8794-9.6206 0-9.665-7.835-17.5-17.5-17.5-3.5538 0-6.8602 1.0593-9.6206 2.8794 3.1299-4.74691 8.5094-7.8794 14.6206-7.8794 9.665 0 17.5 7.835 17.5 17.5z"/><path d="m32.0003 36.1994c.0403-.0261.0805-.0524.1206-.0788-.0398.0604-.08.1206-.1206.1805z"/><path d="m7.80088 12c.02611-.0403.05238-.0805.07882-.1206-.06043.0398-.12059.08-.18048.1206z"/></g></g></svg>`
-  },
-  {
-    id: "luminous",
-    name: "Luminous",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 42 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m14.1061 19.6565c5.499-2.6299 9.8025-7.0929 12.2731-12.67168-1.5939-1.67362-3.666-2.86907-5.8975-3.58634l-1.1954-.39848c-.0797.15939-.1594.39849-.1594.55788-1.9127 5.41936-5.8178 9.80262-11.07766 12.27322-3.66599 1.7533-6.37564 4.9412-7.650763 8.7666l-.398477 1.1955c.159391.0797.39848.1593.557871.1593 1.514209.5579 3.028419 1.2752 4.462939 2.1519 1.99238-3.5864 5.18019-6.6148 9.08529-8.4479z"/><path d="m37.2173 19.9753c-2.9487 4.463-7.0132 8.0494-12.034 10.4403-4.0645 1.9127-7.1726 5.499-8.6071 9.8026l-.3985 1.3549c1.5142 1.3548 3.3472 2.3909 5.3396 3.0284l1.1955.3985c.0796-.1594.1593-.3985.1593-.5579 1.9127-5.4193 5.8178-9.8026 11.0777-12.2732 3.666-1.7533 6.4553-4.9412 7.6507-8.7666l.3985-1.1954c-1.6736-.4782-3.2675-1.2752-4.7817-2.2316z" opacity=".6"/><path d="m12.9903 37.4284c1.9924-4.7818 5.6584-8.6869 10.3604-10.9184 4.3035-2.0721 7.8898-5.26 10.3604-9.1651-1.833-1.7533-3.3472-3.7458-4.463-6.1366-2.9487 5.4193-7.571 9.8026-13.2294 12.5123-3.2675 1.5142-5.8974 4.1442-7.49136 7.3321 1.75326 1.6736 3.18786 3.7457 4.30356 6.0569 0 0 .0797.1594.1594.3188z" opacity=".8"/></g></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 42 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m14.1061 19.6565c5.499-2.6299 9.8025-7.0929 12.2731-12.67168-1.5939-1.67362-3.666-2.86907-5.8975-3.58634l-1.1954-.39848c-.0797.15939-.1594.39849-.1594.55788-1.9127 5.41936-5.8178 9.80262-11.07766 12.27322-3.66599 1.7533-6.37564 4.9412-7.650763 8.7666l-.398477 1.1955c.159391.0797.39848.1593.557871.1593 1.514209.5579 3.028419 1.2752 4.462939 2.1519 1.99238-3.5864 5.18019-6.6148 9.08529-8.4479z"/><path d="m37.2173 19.9753c-2.9487 4.463-7.0132 8.0494-12.034 10.4403-4.0645 1.9127-7.1726 5.499-8.6071 9.8026l-.3985 1.3549c1.5142 1.3548 3.3472 2.3909 5.3396 3.0284l1.1955.3985c.0796-.1594.1593-.3985.1593-.5579 1.9127-5.4193 5.8178-9.8026 11.0777-12.2732 3.666-1.7533 6.4553-4.9412 7.6507-8.7666l.3985-1.1954c-1.6736-.4782-3.2675-1.2752-4.7817-2.2316z" opacity=".5"/><path d="m12.9903 37.4284c1.9924-4.7818 5.6584-8.6869 10.3604-10.9184 4.3035-2.0721 7.8898-5.26 10.3604-9.1651-1.833-1.7533-3.3472-3.7458-4.463-6.1366-2.9487 5.4193-7.571 9.8026-13.2294 12.5123-3.2675 1.5142-5.8974 4.1442-7.49136 7.3321 1.75326 1.6736 3.18786 3.7457 4.30356 6.0569 0 0 .0797.1594.1594.3188z" opacity=".7"/></g></svg>`
-  },
-  {
-    id: "pollinate",
-    name: "Pollinate",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 38 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m25.0008 24c0 3.3137-2.6863 6-6 6s-6-2.6863-6-6 2.6863-6 6-6 6 2.6863 6 6z"/><path d="m25.0008 10c0 3.3137-2.6863 6-6 6s-6-2.6863-6-6c0-3.31371 2.6863-6 6-6s6 2.68629 6 6z"/><path d="m37.125 31c0 3.3137-2.6863 6-6 6s-6-2.6863-6-6 2.6863-6 6-6 6 2.6863 6 6z"/><path d="m37.127 17.0002c0 3.3137-2.6863 6-6 6-3.3138 0-6-2.6863-6-6s2.6862-6 6-6c3.3137 0 6 2.6863 6 6z"/><path d="m25.0008 38c0 3.3137-2.6863 6-6 6s-6-2.6863-6-6 2.6863-6 6-6 6 2.6863 6 6z"/><path d="m12.877 17c0 3.3137-2.6863 6-6.00005 6-3.31371 0-5.999997-2.6863-5.999997-6s2.686287-6 5.999997-6c3.31375 0 6.00005 2.6863 6.00005 6z"/><path d="m12.875 30.9997c0 3.3137-2.6863 6-6 6-3.31371 0-6-2.6863-6-6s2.68629-6 6-6c3.3137 0 6 2.6863 6 6z"/></g></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 38 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m25.0008 24c0 3.3137-2.6863 6-6 6s-6-2.6863-6-6 2.6863-6 6-6 6 2.6863 6 6z"/><path d="m25.0008 10c0 3.3137-2.6863 6-6 6s-6-2.6863-6-6c0-3.31371 2.6863-6 6-6s6 2.68629 6 6z"/><path d="m37.125 31c0 3.3137-2.6863 6-6 6s-6-2.6863-6-6 2.6863-6 6-6 6 2.6863 6 6z"/><path d="m37.127 17.0002c0 3.3137-2.6863 6-6 6-3.3138 0-6-2.6863-6-6s2.6862-6 6-6c3.3137 0 6 2.6863 6 6z"/><path d="m25.0008 38c0 3.3137-2.6863 6-6 6s-6-2.6863-6-6 2.6863-6 6-6 6 2.6863 6 6z"/><path d="m12.877 17c0 3.3137-2.6863 6-6.00005 6-3.31371 0-5.999997-2.6863-5.999997-6s2.686287-6 5.999997-6c3.31375 0 6.00005 2.6863 6.00005 6z"/><path d="m12.875 30.9997c0 3.3137-2.6863 6-6 6-3.31371 0-6-2.6863-6-6s2.68629-6 6-6c3.3137 0 6 2.6863 6 6z"/></g></svg>`
-  },
-  {
-    id: "polymath",
-    name: "Polymath",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 38 48" width="100%" xmlns="http://www.w3.org/2000/svg"><circle cx="19" cy="24" r="16" stroke="#155eef" stroke-width="6"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 38 48" width="100%" xmlns="http://www.w3.org/2000/svg"><circle cx="19" cy="24" r="16" stroke="#fff" stroke-width="6"/></svg>`
-  },
-  {
-    id: "prometheus",
-    name: "Prometheus",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 44 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m10.4993 16.5h-7.29875c-1.76731 0-3.20055 1.4327-3.20055 3.2v2.8h11c2.7614 0 5-2.2386 5-5s2.2386-5 5-5h19c2.2091 0 4-1.7909 4-4v-3h-22.5c-3.0376 0-5.5 2.46243-5.5 5.5 0 3.0376-2.4631 5.5-5.5007 5.5z"/><path d="m10.4993 26.5h-7.29875c-1.76731 0-3.20055 1.4327-3.20055 3.2v2.8h11c2.7614 0 5-2.2386 5-5s2.2386-5 5-5h13c2.2091 0 4-1.7909 4-4v-3h-16.5c-3.0376 0-5.5 2.4624-5.5 5.5s-2.4631 5.5-5.5007 5.5z" opacity=".7"/><path d="m10.4993 36.5h-7.29875c-1.76731 0-3.20055 1.4327-3.20055 3.2v2.8h11c2.7614 0 5-2.2386 5-5s2.2386-5 5-5h7.8c1.7673 0 3.2-1.4327 3.2-3.2v-3.8h-10.5c-3.0376 0-5.5 2.4624-5.5 5.5s-2.4631 5.5-5.5007 5.5z" opacity=".5"/></g></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 44 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m10.4993 16.5h-7.29875c-1.76731 0-3.20055 1.4327-3.20055 3.2v2.8h11c2.7614 0 5-2.2386 5-5s2.2386-5 5-5h19c2.2091 0 4-1.7909 4-4v-3h-22.5c-3.0376 0-5.5 2.46243-5.5 5.5 0 3.0376-2.4631 5.5-5.5007 5.5z"/><path d="m10.4993 26.5h-7.29875c-1.76731 0-3.20055 1.4327-3.20055 3.2v2.8h11c2.7614 0 5-2.2386 5-5s2.2386-5 5-5h13c2.2091 0 4-1.7909 4-4v-3h-16.5c-3.0376 0-5.5 2.4624-5.5 5.5s-2.4631 5.5-5.5007 5.5z" opacity=".75"/><path d="m10.4993 36.5h-7.29875c-1.76731 0-3.20055 1.4327-3.20055 3.2v2.8h11c2.7614 0 5-2.2386 5-5s2.2386-5 5-5h7.8c1.7673 0 3.2-1.4327 3.2-3.2v-3.8h-10.5c-3.0376 0-5.5 2.4624-5.5 5.5s-2.4631 5.5-5.5007 5.5z" opacity=".5"/></g></svg>`
-  },
-  {
-    id: "quantum",
-    name: "Quantum",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 39 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m9 23c0-5.5228 4.4772-10 10-10 5.5229 0 10 4.4772 10 10h9c0-10.4934-8.5066-19-19-19-10.49341 0-18.99999908 8.5066-19 19s8.50659 19 19 19v-9c-5.5228 0-10-4.4771-10-10z"/><path d="m29 23c0 5.5228 4.4772 10 10 10v9c-10.4934 0-19-8.5066-19-19z" opacity=".5"/></g></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 39 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m9 23c0-5.5228 4.4772-10 10-10 5.5229 0 10 4.4772 10 10h9c0-10.4934-8.5066-19-19-19-10.49341 0-18.99999908 8.5066-19 19s8.50659 19 19 19v-9c-5.5228 0-10-4.4771-10-10z"/><path d="m29 23c0 5.5228 4.4772 10 10 10v9c-10.4934 0-19-8.5066-19-19z" opacity=".5"/></g></svg>`
-  },
-  {
-    id: "quartz-ai",
-    name: "QuartzAI",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 44 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m17.6264 6.5h14.8017l11.4661 18.6661-15.7786 15.9489-22.68835-4.0459-5.157719-19.2098zm.5273 4.9692-6.816 15.105 6.4504 5.3411 8.8246-3.7975zm12.3276 15.3 9.2139-2.7073-7.1983-11.7184zm-.6163-17.2692h-9.3468l7.3309 14.4284zm6.9795 18.5263-6.779 1.9919-.5448 5.4109zm-10.5005 9.008.5824-5.7856-6.0573 2.6067zm-6.8394-.5022-10.91261-1.9459 1.64741-5.0264 6.438 5.3308zm-11.69782-9.1824-2.7037-3.0571 1.66868 6.215zm-3.53432-8.5248 4.81433 5.4437 5.50351-12.1963z" fill="#155eef" fill-rule="evenodd"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 44 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m17.6264 6.5h14.8017l11.4661 18.6661-15.7786 15.9489-22.68835-4.0459-5.157719-19.2098zm.5273 4.9692-6.816 15.105 6.4504 5.3411 8.8246-3.7975zm12.3276 15.3 9.2139-2.7073-7.1983-11.7184zm-.6163-17.2692h-9.3468l7.3309 14.4284zm6.9795 18.5263-6.779 1.9919-.5448 5.4109zm-10.5005 9.008.5824-5.7856-6.0573 2.6067zm-6.8394-.5022-10.91261-1.9459 1.64741-5.0264 6.438 5.3308zm-11.69782-9.1824-2.7037-3.0571 1.66868 6.215zm-3.53432-8.5248 4.81433 5.4437 5.50351-12.1963z" fill="#fff" fill-rule="evenodd"/></svg>`
-  },
-  {
-    id: "radius",
-    name: "Radius",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g clip-rule="evenodd" fill="#155eef" fill-rule="evenodd"><path d="m18.5 19v-15h3v15z"/><path d="m18.5 44v-15h3v15z"/><path d="m22.4754 19.404 10.6066-10.60664 2.1214 2.12134-8.4853 8.4853z"/><path d="m4.79776 37.0816 10.60664-10.6066 2.1213 2.1214-10.60662 10.6066z"/><path d="m26.7178 28.5963 8.4853 8.4852-2.1213 2.1214-10.6066-10.6066z"/><path d="m6.91885 8.79727 10.60665 10.60663-2.1214 2.1213-10.60657-10.6066z"/><path d="m18.5 22.5h21.5v3h-21.5z"/><path d="m.00000026 22.5h14.99999974v3h-15z"/></g></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 40 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g clip-rule="evenodd" fill="#155eef" fill-rule="evenodd"><path d="m18.5 19v-15h3v15z"/><path d="m18.5 44v-15h3v15z"/><path d="m22.4754 19.404 10.6066-10.60664 2.1214 2.12134-8.4853 8.4853z"/><path d="m4.79776 37.0816 10.60664-10.6066 2.1213 2.1214-10.60662 10.6066z"/><path d="m26.7178 28.5963 8.4853 8.4852-2.1213 2.1214-10.6066-10.6066z"/><path d="m6.91885 8.79727 10.60665 10.60663-2.1214 2.1213-10.60657-10.6066z"/><path d="m18.5 22.5h21.5v3h-21.5z"/><path d="m.00000026 22.5h14.99999974v3h-15z"/></g></svg>`
-  },
-  {
-    id: "railspeed",
-    name: "Railspeed",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 36 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m0 7.5h28.8c2.5202 0 3.7804 0 4.743.49047.8467.43143 1.5351 1.11984 1.9665 1.96657.4905.96256.4905 2.22276.4905 4.74296v1.8h-28.8c-2.52024 0-3.78035 0-4.74296-.4905-.84673-.4314-1.535139-1.1198-1.966569-1.9665-.490471-.9626-.490471-2.2228-.490471-4.743z"/><path d="m0 28.5h28.8c2.5202 0 3.7804 0 4.743-.4905.8467-.4314 1.5351-1.1198 1.9665-1.9665.4905-.9626.4905-2.2228.4905-4.743v-1.8h-28.8c-2.52024 0-3.78035 0-4.74296.4905-.84673.4314-1.535139 1.1198-1.966569 1.9665-.490471.9626-.490471 2.2228-.490471 4.743z"/><path d="m14 31.5h14.8c2.5202 0 3.7804 0 4.743.4905.8467.4314 1.5351 1.1198 1.9665 1.9665.4905.9626.4905 2.2228.4905 4.743v1.8h-14.8c-2.5202 0-3.7804 0-4.743-.4905-.8467-.4314-1.5351-1.1198-1.9665-1.9665-.4905-.9626-.4905-2.2228-.4905-4.743z"/></g></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 36 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m0 7.5h28.8c2.5202 0 3.7804 0 4.743.49047.8467.43143 1.5351 1.11984 1.9665 1.96657.4905.96256.4905 2.22276.4905 4.74296v1.8h-28.8c-2.52024 0-3.78035 0-4.74296-.4905-.84673-.4314-1.535139-1.1198-1.966569-1.9665-.490471-.9626-.490471-2.2228-.490471-4.743z"/><path d="m0 28.5h28.8c2.5202 0 3.7804 0 4.743-.4905.8467-.4314 1.5351-1.1198 1.9665-1.9665.4905-.9626.4905-2.2228.4905-4.743v-1.8h-28.8c-2.52024 0-3.78035 0-4.74296.4905-.84673.4314-1.535139 1.1198-1.966569 1.9665-.490471.9626-.490471 2.2228-.490471 4.743z"/><path d="m14 31.5h14.8c2.5202 0 3.7804 0 4.743.4905.8467.4314 1.5351 1.1198 1.9665 1.9665.4905.9626.4905 2.2228.4905 4.743v1.8h-14.8c-2.5202 0-3.7804 0-4.743-.4905-.8467-.4314-1.5351-1.1198-1.9665-1.9665-.4905-.9626-.4905-2.2228-.4905-4.743z"/></g></svg>`
-  },
-  {
-    id: "refractional",
-    name: "Refractional",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 48 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path d="m48 11h-17.0775c-1.2151 0-2.3644.5524-3.1235 1.5012l-1.598 1.9976c-.7591.9488-1.9084 1.5012-3.1235 1.5012h-15.0775l-4 5h17.0775c1.2151 0 2.3644-.5524 3.1235-1.5012l1.598-1.9976c.7591-.9488 1.9084-1.5012 3.1235-1.5012h15.0775z" fill="#444ce7"/><path d="m46 19h-17.0775c-1.2151 0-2.3644.5524-3.1235 1.5012l-1.598 1.9976c-.7591.9488-1.9084 1.5012-3.1235 1.5012h-15.0775l-4 5h17.0775c1.2151 0 2.3644-.5524 3.1235-1.5012l1.598-1.9976c.7591-.9488 1.9084-1.5012 3.1235-1.5012h15.0775z" fill="#155eef"/><path d="m44 27h-17.0775c-1.2151 0-2.3644.5524-3.1235 1.5012l-1.598 1.9976c-.7591.9488-1.9084 1.5012-3.1235 1.5012h-15.0775l-4 5h17.0775c1.2151 0 2.3644-.5524 3.1235-1.5012l1.598-1.9976c.7591-.9488 1.9084-1.5012 3.1235-1.5012h15.0775z" fill="#8098f9"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 48 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#fff"><path d="m48 11h-17.0775c-1.2151 0-2.3644.5524-3.1235 1.5012l-1.598 1.9976c-.7591.9488-1.9084 1.5012-3.1235 1.5012h-15.0775l-4 5h17.0775c1.2151 0 2.3644-.5524 3.1235-1.5012l1.598-1.9976c.7591-.9488 1.9084-1.5012 3.1235-1.5012h15.0775z"/><path d="m46 19h-17.0775c-1.2151 0-2.3644.5524-3.1235 1.5012l-1.598 1.9976c-.7591.9488-1.9084 1.5012-3.1235 1.5012h-15.0775l-4 5h17.0775c1.2151 0 2.3644-.5524 3.1235-1.5012l1.598-1.9976c.7591-.9488 1.9084-1.5012 3.1235-1.5012h15.0775z"/><path d="m44 27h-17.0775c-1.2151 0-2.3644.5524-3.1235 1.5012l-1.598 1.9976c-.7591.9488-1.9084 1.5012-3.1235 1.5012h-15.0775l-4 5h17.0775c1.2151 0 2.3644-.5524 3.1235-1.5012l1.598-1.9976c.7591-.9488 1.9084-1.5012 3.1235-1.5012h15.0775z"/></g></svg>`
-  },
-  {
-    id: "renaissance",
-    name: "Renaissance",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 35 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m12.7018 5c1.841 0 3.4172 1.31967 3.7408 3.13199l.4648 2.60271c.3236 1.8123 1.8998 3.132 3.7408 3.132h3.1518c4.8969 0 8.8667 3.9697 8.8667 8.8666 0 2.9333-1.4244 5.5339-3.6191 7.1479.92.3126 1.6466.809 2.1799 1.461.549.7191.9411 1.7411 1.1764 3.028.0392.3406.0883.6718.1373 1.003s.098.6624.1372 1.003c.0408.3538.0709.6566.096.9083.0232.233.042.4223.0609.5679.0784 1.0598.1961 1.9303.3529 2.5738.1655.9048.4994 1.7867.9727 2.5738h-6.6982c-.3137-.6056-.5098-1.3248-.6666-2.1196-.1349-.6836-.2408-1.5352-.3676-2.5548-.0207-.1659-.0418-.3362-.0638-.5111l-.2353-1.7411c-.1961-1.3247-.4314-2.271-.6667-2.8766-.2745-.5677-.7058-.9841-1.2941-1.2112-.6274-.2271-1.5686-.3856-2.9019-.3856h-.3018c-1.841 0-3.4172-1.3197-3.7408-3.132l-.4648-2.6027c-.3236-1.8123-1.8998-3.132-3.7408-3.132h-5.68517v10.1334h-6.33333v-27.8667zm13.6315 17.7333c0 1.3992-1.1342 2.5334-2.5333 2.5334h-3.1518c-1.841 0-3.4172-1.3197-3.7408-3.132l-.4648-2.6027c-.3236-1.8123-1.8998-3.132-3.7408-3.132h-5.36847v-5.0667h5.68517c1.841 0 3.4172 1.3197 3.7408 3.132l.4647 2.6027c.3237 1.8123 1.8999 3.132 3.7409 3.132h2.8351c1.3991 0 2.5333 1.1342 2.5333 2.5333z" fill="#1849a9" fill-rule="evenodd"/></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 35 48" width="100%" xmlns="http://www.w3.org/2000/svg"><path clip-rule="evenodd" d="m12.7018 5c1.841 0 3.4172 1.31967 3.7408 3.13199l.4648 2.60271c.3236 1.8123 1.8998 3.132 3.7408 3.132h3.1518c4.8969 0 8.8667 3.9697 8.8667 8.8666 0 2.9333-1.4244 5.5339-3.6191 7.1479.92.3126 1.6466.809 2.1799 1.461.549.7191.9411 1.7411 1.1764 3.028.0392.3406.0883.6718.1373 1.003s.098.6624.1372 1.003c.0408.3538.0709.6566.096.9083.0232.233.042.4223.0609.5679.0784 1.0598.1961 1.9303.3529 2.5738.1655.9048.4994 1.7867.9727 2.5738h-6.6982c-.3137-.6056-.5098-1.3247-.6666-2.1196-.1349-.6836-.2408-1.5352-.3676-2.5548-.0207-.1659-.0418-.3362-.0638-.5111l-.2353-1.7411c-.1961-1.3247-.4314-2.271-.6667-2.8766-.2745-.5677-.7058-.9841-1.2941-1.2112-.6274-.2271-1.5686-.3856-2.9019-.3856h-.3018c-1.841 0-3.4172-1.3197-3.7408-3.132l-.4648-2.6027c-.3236-1.8123-1.8998-3.132-3.7408-3.132h-5.68517v10.1334h-6.33333v-27.8667zm13.6315 17.7333c0 1.3992-1.1342 2.5334-2.5333 2.5334h-3.1518c-1.841 0-3.4172-1.3197-3.7408-3.132l-.4648-2.6027c-.3236-1.8123-1.8998-3.132-3.7408-3.132h-5.36847v-5.0667h5.68517c1.841 0 3.4172 1.3197 3.7408 3.132l.4647 2.6027c.3237 1.8123 1.8999 3.132 3.7409 3.132h2.8351c1.3991 0 2.5333 1.1342 2.5333 2.5333z" fill="#fff" fill-rule="evenodd"/></svg>`
-  },
-  {
-    id: "sisyphus",
-    name: "Sisyphus",
-    lightSvg: `<svg fill="none" height="100%" viewBox="0 0 32 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m.599609 19.2002h9.59998v9.59999h-9.59998z"/><path d="m31.4004 28.7998h9.6v9.59999h-9.6z" transform="matrix(-1 0 -0 -1 62.8008 57.5996)"/><path d="m10.1992 19.2001 11.6-9.6v9.6l-11.6 9.6z" opacity=".2"/><path d="m21.7988 28.7999-11.6 9.6v-9.6l11.6-9.6z" opacity=".5"/><path d="m.599609 19.2 21.199991-19.2v9.59999l-11.6 9.60001z" opacity=".6"/><path d="m31.4004 28.8-21.2 19.2v-9.6l11.6-9.6z" opacity=".7"/></g></svg>`,
-    darkSvg: `<svg fill="none" height="100%" viewBox="0 0 32 48" width="100%" xmlns="http://www.w3.org/2000/svg"><g fill="#155eef"><path d="m.599609 19.2002h9.59998v9.59999h-9.59998z"/><path d="m31.4004 28.7998h9.6v9.59999h-9.6z" transform="matrix(-1 0 -0 -1 62.8008 57.5996)"/><path d="m10.1992 19.2001 11.6-9.6v9.6l-11.6 9.6z" opacity=".2"/><path d="m21.7988 28.7999-11.6 9.6v-9.6l11.6-9.6z" opacity=".5"/><path d="m.599609 19.2 21.199991-19.2v9.59999l-11.6 9.60001z" opacity=".6"/><path d="m31.4004 28.8-21.2 19.2v-9.6l11.6-9.6z" opacity=".7"/></g></svg>`
-  },
-  {
-    id: "solaris-energy",
-    name: "Solaris Energy",
-    lightSvg: `<svg width="100%" height="100%" viewBox="0 0 40 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 4V16.3604C20 19.087 16.6569 20.3998 14.8016 18.4017L7 10M40 24H27.6396C24.913 24 23.6002 20.6569 25.5983 18.8016L34 11M20 44V31.6396C20 28.913 23.3431 27.6002 25.1984 29.5983L33 38M0 24L12.3604 24C15.087 24 16.3998 27.3431 14.4017 29.1984L6 37" stroke="#175CD3" stroke-width="4"/></svg>`,
-    darkSvg: `<svg width="100%" height="100%" viewBox="0 0 40 48" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 4V16.3604C20 19.087 16.6569 20.3998 14.8016 18.4017L7 10M40 24H27.6396C24.913 24 23.6002 20.6569 25.5983 18.8016L34 11M20 44V31.6396C20 28.913 23.3431 27.6002 25.1984 29.5983L33 38M0 24L12.3604 24C15.087 24 16.3998 27.3431 14.4017 29.1984L6 37" stroke="white" stroke-width="4"/></svg>`
-  }
-];
-
-// features/keystone/lib/storefront-branding.ts
-var DEFAULT_STOREFRONT_HUE = 16;
-var DEFAULT_STUDIO_LOGO_ICON = LOGO_ICONS.find((icon) => icon.id === "boltshift").lightSvg;
-var DEFAULT_LIBRARY_LOGO_COLOR = "151";
-var DEFAULT_STUDIO_LOGO_COLOR = "0";
-function normalizeStorefrontHue(value) {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) return DEFAULT_STOREFRONT_HUE;
-  const rounded = Math.round(numeric);
-  return (rounded % 360 + 360) % 360;
-}
-function isStudioLogoColor(value) {
-  if (typeof value === "number") return Number.isFinite(value);
-  if (typeof value !== "string" || !value.trim()) return false;
-  return Number.isFinite(Number(value.trim()));
-}
-function normalizeStudioLogoColor(value) {
-  const numeric = Number.parseFloat(String(value ?? DEFAULT_STUDIO_LOGO_COLOR));
-  if (!Number.isFinite(numeric)) return DEFAULT_STUDIO_LOGO_COLOR;
-  return String((numeric % 360 + 360) % 360);
-}
-var NAMED_COLORS = Object.fromEntries(
-  "aliceblue:f0f8ff antiquewhite:faebd7 aqua:00ffff aquamarine:7fffd4 azure:f0ffff beige:f5f5dc bisque:ffe4c4 black:000000 blanchedalmond:ffebcd blue:0000ff blueviolet:8a2be2 brown:a52a2a burlywood:deb887 cadetblue:5f9ea0 chartreuse:7fff00 chocolate:d2691e coral:ff7f50 cornflowerblue:6495ed cornsilk:fff8dc crimson:dc143c cyan:00ffff darkblue:00008b darkcyan:008b8b darkgoldenrod:b8860b darkgray:a9a9a9 darkgreen:006400 darkgrey:a9a9a9 darkkhaki:bdb76b darkmagenta:8b008b darkolivegreen:556b2f darkorange:ff8c00 darkorchid:9932cc darkred:8b0000 darksalmon:e9967a darkseagreen:8fbc8f darkslateblue:483d8b darkslategray:2f4f4f darkslategrey:2f4f4f darkturquoise:00ced1 darkviolet:9400d3 deeppink:ff1493 deepskyblue:00bfff dimgray:696969 dimgrey:696969 dodgerblue:1e90ff firebrick:b22222 floralwhite:fffaf0 forestgreen:228b22 fuchsia:ff00ff gainsboro:dcdcdc ghostwhite:f8f8ff gold:ffd700 goldenrod:daa520 gray:808080 green:008000 greenyellow:adff2f grey:808080 honeydew:f0fff0 hotpink:ff69b4 indianred:cd5c5c indigo:4b0082 ivory:fffff0 khaki:f0e68c lavender:e6e6fa lavenderblush:fff0f5 lawngreen:7cfc00 lemonchiffon:fffacd lightblue:add8e6 lightcoral:f08080 lightcyan:e0ffff lightgoldenrodyellow:fafad2 lightgray:d3d3d3 lightgreen:90ee90 lightgrey:d3d3d3 lightpink:ffb6c1 lightsalmon:ffa07a lightseagreen:20b2aa lightskyblue:87cefa lightslategray:778899 lightslategrey:778899 lightsteelblue:b0c4de lightyellow:ffffe0 lime:00ff00 limegreen:32cd32 linen:faf0e6 magenta:ff00ff maroon:800000 mediumaquamarine:66cdaa mediumblue:0000cd mediumorchid:ba55d3 mediumpurple:9370db mediumseagreen:3cb371 mediumslateblue:7b68ee mediumspringgreen:00fa9a mediumturquoise:48d1cc mediumvioletred:c71585 midnightblue:191970 mintcream:f5fffa mistyrose:ffe4e1 moccasin:ffe4b5 navajowhite:ffdead navy:000080 oldlace:fdf5e6 olive:808000 olivedrab:6b8e23 orange:ffa500 orangered:ff4500 orchid:da70d6 palegoldenrod:eee8aa palegreen:98fb98 paleturquoise:afeeee palevioletred:db7093 papayawhip:ffefd5 peachpuff:ffdab9 peru:cd853f pink:ffc0cb plum:dda0dd powderblue:b0e0e6 purple:800080 rebeccapurple:663399 red:ff0000 rosybrown:bc8f8f royalblue:4169e1 saddlebrown:8b4513 salmon:fa8072 sandybrown:f4a460 seagreen:2e8b57 seashell:fff5ee sienna:a0522d silver:c0c0c0 skyblue:87ceeb slateblue:6a5acd slategray:708090 slategrey:708090 snow:fffafa springgreen:00ff7f steelblue:4682b4 tan:d2b48c teal:008080 thistle:d8bfd8 tomato:ff6347 turquoise:40e0d0 violet:ee82ee wheat:f5deb3 white:ffffff whitesmoke:f5f5f5 yellow:ffff00 yellowgreen:9acd32".split(" ").map((entry) => entry.split(":"))
-);
-
-// features/keystone/models/StudioSettings.ts
+init_access();
+init_tenantPolicy();
+init_trackingFields();
+init_tenantRelationships();
+init_studioLogo();
+init_storefront_branding();
 var StudioSettings = (0, import_core16.list)({
   access: {
     operation: {
@@ -5310,6 +7320,15 @@ var StudioSettings = (0, import_core16.list)({
     }),
     // Members who cancel a confirmed class this close to the start forfeit its credit (Mindbody late-cancel window).
     // A late-cancelled paid drop-in is not refunded. Staff cancellations are always treated as waived. 0 turns it off.
+    privateCancelWindowHours: (0, import_fields17.integer)({ defaultValue: 24, validation: { isRequired: true, min: 0, max: 168 }, ui: { description: "Free-cancel window for privates, duets and trios (hours)" } }),
+    lateCancelFee: (0, import_fields17.integer)({ defaultValue: 1500, validation: { isRequired: true, min: 0, max: 1e5 }, ui: { description: "Late-cancel fee for unlimited members (cents)" } }),
+    noShowFee: (0, import_fields17.integer)({ defaultValue: 2e3, validation: { isRequired: true, min: 0, max: 1e5 }, ui: { description: "No-show fee for unlimited members (cents)" } }),
+    lateCancelWaiversPer30Days: (0, import_fields17.integer)({ defaultValue: 1, validation: { isRequired: true, min: 0, max: 10 }, ui: { description: "Late cancels an unlimited member may make in 30 days before a fee applies" } }),
+    waitlistCutoffMinutes: (0, import_fields17.integer)({ defaultValue: 120, validation: { isRequired: true, min: 0, max: 1440 }, ui: { description: "No waitlist promotion inside this many minutes before class; the freed machine is open to book" } }),
+    bookingHorizonDays: (0, import_fields17.integer)({ defaultValue: 14, validation: { isRequired: true, min: 1, max: 90 }, ui: { description: "How many days ahead a client without a membership can book" } }),
+    requireWaiver: (0, import_fields17.checkbox)({ defaultValue: true }),
+    gripSocksRequired: (0, import_fields17.checkbox)({ defaultValue: true }),
+    arriveEarlyMinutes: (0, import_fields17.integer)({ defaultValue: 10, validation: { isRequired: true, min: 0, max: 60 } }),
     lateCancelHours: (0, import_fields17.integer)({
       defaultValue: 12,
       validation: { isRequired: true, min: 0, max: 72 },
@@ -5377,6 +7396,9 @@ var StudioSettings = (0, import_core16.list)({
 var import_core17 = require("@keystone-6/core");
 var import_access33 = require("@keystone-6/core/access");
 var import_fields18 = require("@keystone-6/core/fields");
+init_access();
+init_trackingFields();
+init_tenantRelationships();
 var AttendanceRecord = (0, import_core17.list)({
   db: { extendPrismaSchema: compoundUniqueDb("organizationId, bookingId") },
   access: {
@@ -5516,8 +7538,12 @@ var import_core18 = require("@keystone-6/core");
 var import_access35 = require("@keystone-6/core/access");
 var import_fields19 = require("@keystone-6/core/fields");
 var import_fields_document2 = require("@keystone-6/fields-document");
+init_access();
+init_tenantPolicy();
+init_trackingFields();
 var import_fields20 = require("@keystone-6/core/fields");
 init_prisma_result();
+init_tenantRelationships();
 var ClassType = (0, import_core18.list)({
   db: { extendPrismaSchema: compoundUniqueDb("organizationId, name") },
   hooks: {
@@ -5602,6 +7628,30 @@ var ClassType = (0, import_core18.list)({
         description: "Estimated calories burned per session"
       }
     }),
+    apparatus: (0, import_fields19.select)({
+      type: "string",
+      options: ["reformer", "tower", "chair", "cadillac", "barrel", "mat", "other"].map((value) => ({ label: value[0].toUpperCase() + value.slice(1), value })),
+      defaultValue: "reformer",
+      validation: { isRequired: true }
+    }),
+    creditKind: (0, import_fields19.select)({
+      type: "string",
+      options: [{ label: "Group class", value: "group" }, { label: "Private", value: "private" }, { label: "Duet or trio", value: "duet" }],
+      defaultValue: "group",
+      validation: { isRequired: true }
+    }),
+    capacityMode: (0, import_fields19.select)({
+      type: "string",
+      options: [{ label: "Client picks a machine", value: "pick_a_spot" }, { label: "First come (capacity only)", value: "first_come" }],
+      defaultValue: "pick_a_spot",
+      validation: { isRequired: true },
+      ui: { description: "Pick a spot: the client chooses a numbered machine on the room map. First come: a mat class capped by capacity." }
+    }),
+    requiresIntro: (0, import_fields19.checkbox)({ defaultValue: false, ui: { description: "Clients must have attended an intro class before booking this one" } }),
+    isIntroClass: (0, import_fields19.checkbox)({ defaultValue: false, ui: { description: "Attending this class satisfies 'requires intro' on other class types" } }),
+    cancelWindowHoursOverride: (0, import_fields19.integer)({ validation: { min: 0, max: 72 }, ui: { description: "Overrides the studio's free-cancel window for this class type (hours); empty uses the studio default" } }),
+    lateCancelFeeOverride: (0, import_fields19.integer)({ validation: { min: 0, max: 1e5 }, ui: { description: "Overrides the studio's late-cancel fee (cents); empty uses the studio default" } }),
+    noShowFeeOverride: (0, import_fields19.integer)({ validation: { min: 0, max: 1e5 }, ui: { description: "Overrides the studio's no-show fee (cents); empty uses the studio default" } }),
     schedules: (0, import_fields20.relationship)({
       ref: "ClassSchedule.classType",
       many: true,
@@ -5615,6 +7665,10 @@ var ClassType = (0, import_core18.list)({
 var import_core19 = require("@keystone-6/core");
 var import_access37 = require("@keystone-6/core/access");
 var import_fields21 = require("@keystone-6/core/fields");
+init_access();
+init_trackingFields();
+init_tenantRelationships();
+init_tenantPolicy();
 init_prisma_result();
 var validateClassScheduleTenant = validateTenantOwnership([
   { field: "instructor", list: "instructor" },
@@ -5830,8 +7884,13 @@ var ClassSchedule = (0, import_core19.list)({
 var import_core20 = require("@keystone-6/core");
 var import_access39 = require("@keystone-6/core/access");
 var import_fields22 = require("@keystone-6/core/fields");
+init_access();
+init_trackingFields();
+init_studioLifecyclePolicy();
+init_tenantRelationships();
 var ClassBooking = (0, import_core20.list)({
-  db: { extendPrismaSchema: compoundUniqueDb("organizationId, classInstanceId, memberId, activeBookingKey") },
+  // One active booking per (class, client) and per (class, machine): the database refuses a second.
+  db: { extendPrismaSchema: compoundUniqueDb("organizationId, classInstanceId, memberId, activeBookingKey", "organizationId, classInstanceId, spotId, activeSpotKey") },
   hooks: {
     async validateInput(args) {
       bookingLifecycleHooks.validateInput(args);
@@ -5915,6 +7974,14 @@ var ClassBooking = (0, import_core20.list)({
         description: "Special notes or requests for this booking"
       }
     }),
+    // The machine this booking holds. Kept after a cancel for history; activeSpotKey is what holds it.
+    spot: (0, import_fields22.relationship)({ ref: "Spot", access: { create: import_access39.denyAll, update: import_access39.denyAll } }),
+    activeSpotKey: (0, import_fields22.text)({
+      db: { isNullable: true },
+      access: { read: import_access39.denyAll, create: import_access39.denyAll, update: import_access39.denyAll }
+    }),
+    // joined, booked, promoted, skipped, left, lapsed, spot_changed, cancelled ... (dissertation 4.2, 4.8)
+    history: (0, import_fields22.json)({ defaultValue: [], access: { create: import_access39.denyAll, update: import_access39.denyAll }, ui: { itemView: { fieldMode: "read" } } }),
     activeBookingKey: (0, import_fields22.text)({
       db: { isNullable: true },
       access: { read: import_access39.denyAll, create: import_access39.denyAll, update: import_access39.denyAll }
@@ -5924,8 +7991,11 @@ var ClassBooking = (0, import_core20.list)({
       type: "string",
       options: [
         { label: "Confirmed", value: "confirmed" },
+        { label: "Waitlisted", value: "waitlisted" },
         { label: "Cancelled", value: "cancelled" },
-        { label: "Waitlist", value: "waitlist" }
+        { label: "Late cancelled", value: "late_cancelled" },
+        { label: "Attended", value: "attended" },
+        { label: "No show", value: "no_show" }
       ],
       defaultValue: "confirmed",
       validation: { isRequired: true }
@@ -5933,7 +8003,7 @@ var ClassBooking = (0, import_core20.list)({
     waitlistPosition: (0, import_fields22.integer)({
       access: { update: import_access39.denyAll },
       ui: {
-        description: "Position in waitlist (only applicable when status is 'waitlist')"
+        description: "Position in waitlist (only applicable when status is 'waitlisted')"
       }
     }),
     bookedAt: (0, import_fields22.timestamp)({
@@ -5961,374 +8031,22 @@ var import_core21 = require("@keystone-6/core");
 var import_access41 = require("@keystone-6/core/access");
 var import_fields23 = require("@keystone-6/core/fields");
 var import_fields_document3 = require("@keystone-6/fields-document");
+init_access();
+init_tenantPolicy();
+init_trackingFields();
 
 // features/keystone/mutations/studioSettingsLifecycle.ts
 var import_node_fs = require("node:fs");
 var import_node_path = require("node:path");
-
-// lib/time-zone-label.ts
-var KNOWN = {
-  "America/Los_Angeles": { long: "Pacific Time", short: "PT" },
-  "America/Vancouver": { long: "Pacific Time", short: "PT" },
-  "America/Tijuana": { long: "Pacific Time", short: "PT" },
-  "America/Denver": { long: "Mountain Time", short: "MT" },
-  "America/Boise": { long: "Mountain Time", short: "MT" },
-  "America/Edmonton": { long: "Mountain Time", short: "MT" },
-  "America/Phoenix": { long: "Mountain Standard Time", short: "MST" },
-  "America/Chicago": { long: "Central Time", short: "CT" },
-  "America/Winnipeg": { long: "Central Time", short: "CT" },
-  "America/Mexico_City": { long: "Central Time", short: "CT" },
-  "America/New_York": { long: "Eastern Time", short: "ET" },
-  "America/Detroit": { long: "Eastern Time", short: "ET" },
-  "America/Toronto": { long: "Eastern Time", short: "ET" },
-  "America/Indiana/Indianapolis": { long: "Eastern Time", short: "ET" },
-  "America/Halifax": { long: "Atlantic Time", short: "AT" },
-  "America/Anchorage": { long: "Alaska Time", short: "AKT" },
-  "Pacific/Honolulu": { long: "Hawaii Time", short: "HT" },
-  "Europe/London": { long: "UK Time" },
-  "UTC": { long: "Coordinated Universal Time", short: "UTC" },
-  "Etc/UTC": { long: "Coordinated Universal Time", short: "UTC" },
-  "GMT": { long: "Greenwich Mean Time", short: "GMT" },
-  "Etc/GMT": { long: "Greenwich Mean Time", short: "GMT" }
-};
-function intlName(timeZone, style, locale, date) {
-  try {
-    return new Intl.DateTimeFormat(locale, { timeZone, timeZoneName: style }).formatToParts(date).find((part) => part.type === "timeZoneName")?.value;
-  } catch {
-    return void 0;
-  }
-}
-function timeZoneCity(timeZone) {
-  const last = timeZone.split("/").pop() || timeZone;
-  return last.replace(/_/g, " ");
-}
-var isAbbreviation = (value) => Boolean(value && /^[A-Z]{2,5}$/.test(value));
-var isOffsetOnly = (value) => !value || /^(GMT|UTC)([+-−]\d|$)/.test(value);
-function timeZoneNames(timeZone, locale = "en-US", date = /* @__PURE__ */ new Date()) {
-  const zone = typeof timeZone === "string" ? timeZone.trim() : "";
-  if (!zone) return null;
-  const known = KNOWN[zone];
-  if (known) return known;
-  const long = intlName(zone, "longGeneric", locale, date);
-  if (!long || isOffsetOnly(long)) {
-    const offset = intlName(zone, "shortGeneric", locale, date) || long;
-    return offset ? { long: `${timeZoneCity(zone)} time`, short: offset } : null;
-  }
-  const short = intlName(zone, "shortGeneric", locale, date);
-  return { long, short: isAbbreviation(short) ? short : void 0 };
-}
-function timeZoneLabel(timeZone, options = {}) {
-  const zone = typeof timeZone === "string" ? timeZone.trim() : "";
-  if (!zone) return "";
-  const names = timeZoneNames(zone, options.locale, options.date);
-  if (!names) return `${timeZoneCity(zone)} time`;
-  if (options.city) {
-    const city = timeZoneCity(zone);
-    return names.long.toLowerCase().includes(city.toLowerCase()) || /^(UTC|GMT)$/i.test(city) ? names.long : `${names.long} \xB7 ${city}`;
-  }
-  return names.short ? `${names.long} (${names.short})` : names.long;
-}
-
-// lib/timezone.ts
-function normalizeTimeZone(value, fallback = "UTC") {
-  const candidate = typeof value === "string" && value.trim() ? value.trim() : fallback;
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: candidate }).format(/* @__PURE__ */ new Date());
-    return candidate;
-  } catch {
-    throw new Error("timezone must be a valid IANA time-zone name");
-  }
-}
-function resolveStudioTimeZone(studioSettingsTimeZone, organizationTimeZone) {
-  return normalizeTimeZone(studioSettingsTimeZone || organizationTimeZone || "UTC");
-}
-function localDateParts(date, timeZone) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: normalizeTimeZone(timeZone),
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23"
-  }).formatToParts(date);
-  const value = (type) => Number(parts.find((part) => part.type === type)?.value);
-  return {
-    year: value("year"),
-    month: value("month"),
-    day: value("day"),
-    hour: value("hour"),
-    minute: value("minute"),
-    second: value("second")
-  };
-}
-function timeZoneOffsetMilliseconds(date, timeZone) {
-  const parts = localDateParts(date, timeZone);
-  const representedAsUtc = Date.UTC(
-    parts.year,
-    parts.month - 1,
-    parts.day,
-    parts.hour,
-    parts.minute,
-    parts.second
-  );
-  return representedAsUtc - Math.floor(date.getTime() / 1e3) * 1e3;
-}
-function localTimeToUtc(parts, timeZone) {
-  const localEpoch = Date.UTC(
-    parts.year,
-    parts.month - 1,
-    parts.day,
-    parts.hour,
-    parts.minute,
-    parts.second ?? 0
-  );
-  let candidate = new Date(localEpoch);
-  candidate = new Date(localEpoch - timeZoneOffsetMilliseconds(candidate, timeZone));
-  candidate = new Date(localEpoch - timeZoneOffsetMilliseconds(candidate, timeZone));
-  return candidate;
-}
-var NonexistentLocalTimeError = class extends Error {
-};
-function exactLocalTimeToUtc(parts, timeZone) {
-  const zone = normalizeTimeZone(timeZone);
-  const second = parts.second ?? 0;
-  const integers = [parts.year, parts.month, parts.day, parts.hour, parts.minute, second];
-  if (!integers.every(Number.isInteger) || parts.month < 1 || parts.month > 12 || parts.hour < 0 || parts.hour > 23 || parts.minute < 0 || parts.minute > 59 || second < 0 || second > 59) {
-    throw new NonexistentLocalTimeError("Choose a valid date and time");
-  }
-  const localEpoch = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, second);
-  const calendar = new Date(localEpoch);
-  if (calendar.getUTCFullYear() !== parts.year || calendar.getUTCMonth() !== parts.month - 1 || calendar.getUTCDate() !== parts.day) {
-    throw new NonexistentLocalTimeError("Choose a valid date and time");
-  }
-  const offsets = new Set([-36, -12, 0, 12, 36].map((hours) => timeZoneOffsetMilliseconds(new Date(localEpoch + hours * 36e5), zone)));
-  const matches = [...offsets].map((offset) => new Date(localEpoch - offset)).filter((candidate) => {
-    const round = localDateParts(candidate, zone);
-    return round.year === parts.year && round.month === parts.month && round.day === parts.day && round.hour === parts.hour && round.minute === parts.minute && round.second === second;
-  }).sort((a, b) => a.getTime() - b.getTime());
-  if (!matches.length) throw new NonexistentLocalTimeError(`That time does not exist in ${timeZoneLabel(zone)} because of a daylight-saving change. Choose another time.`);
-  return matches[0];
-}
-function localDateStart(dateKey, timeZone) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dateKey));
-  if (!match) throw new NonexistentLocalTimeError("Choose a valid date");
-  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
-  for (let minutes = 0; minutes < 24 * 60; minutes += 1) {
-    try {
-      return exactLocalTimeToUtc({ year, month, day, hour: Math.floor(minutes / 60), minute: minutes % 60 }, timeZone);
-    } catch (error) {
-      if (!(error instanceof NonexistentLocalTimeError) || minutes === 0 && /valid date and time/.test(error.message)) throw new NonexistentLocalTimeError("Choose a valid date");
-    }
-  }
-  throw new NonexistentLocalTimeError("Choose a valid date");
-}
-function nextDateKey(dateKey) {
-  const date = /* @__PURE__ */ new Date(`${dateKey}T12:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + 1);
-  return date.toISOString().slice(0, 10);
-}
-function zonedStartOfDay(date, timeZone) {
-  const local = localDateParts(date, timeZone);
-  return localTimeToUtc({ ...local, hour: 0, minute: 0, second: 0 }, timeZone);
-}
-function zonedStartOfNextDay(date, timeZone) {
-  const local = localDateParts(date, timeZone);
-  const next = new Date(Date.UTC(local.year, local.month - 1, local.day + 1));
-  return localTimeToUtc({
-    year: next.getUTCFullYear(),
-    month: next.getUTCMonth() + 1,
-    day: next.getUTCDate(),
-    hour: 0,
-    minute: 0,
-    second: 0
-  }, timeZone);
-}
-function zonedStartOfMonth(date, timeZone) {
-  const local = localDateParts(date, timeZone);
-  return localTimeToUtc({ year: local.year, month: local.month, day: 1, hour: 0, minute: 0, second: 0 }, timeZone);
-}
-function localWeekdayAtOffset(now, timeZone, dayOffset) {
-  const local = localDateParts(now, timeZone);
-  return new Date(Date.UTC(local.year, local.month - 1, local.day + dayOffset)).getUTCDay();
-}
-function futureLocalOccurrence(now, timeZone, dayOffset, hour, minute) {
-  const local = localDateParts(now, timeZone);
-  const target = new Date(Date.UTC(local.year, local.month - 1, local.day + dayOffset));
-  try {
-    return exactLocalTimeToUtc({
-      year: target.getUTCFullYear(),
-      month: target.getUTCMonth() + 1,
-      day: target.getUTCDate(),
-      hour,
-      minute,
-      second: 0
-    }, timeZone);
-  } catch (error) {
-    if (error instanceof NonexistentLocalTimeError) return null;
-    throw error;
-  }
-}
-
-// features/keystone/mutations/studioSettingsLifecycle.ts
+init_tenantPolicy();
+init_timezone();
+init_studioLogo();
+init_storefront_branding();
 init_participation_terms();
 init_prisma_result();
 init_operational_policy();
 init_classCapacity();
-
-// features/keystone/lib/studio-hours.ts
-function parseClockMinute(value) {
-  const match = value.trim().match(/^(\d{1,2})(?::([0-5]\d))?\s*(am|pm)?$/i);
-  if (!match) throw new Error("Hours need a supported time");
-  let hour = Number(match[1]);
-  if (match[3]) {
-    if (hour < 1 || hour > 12) throw new Error("Hours have an invalid clock hour");
-    hour = hour % 12 + (match[3].toLowerCase() === "pm" ? 12 : 0);
-  } else if (hour > 23 || !match[2]) throw new Error("Use HH:mm for 24-hour times");
-  return hour * 60 + Number(match[2] || 0);
-}
-function range(open, close) {
-  const start = parseClockMinute(open);
-  const end = parseClockMinute(close);
-  if (start === end) throw new Error("Equal opening and closing times are ambiguous");
-  return { start, end };
-}
-function parseDayHours(value) {
-  try {
-    if (typeof value === "string") {
-      const text42 = value.trim().toLowerCase();
-      if (!text42) return null;
-      if (text42 === "closed") return "closed";
-      if (text42 === "24/7" || text42 === "24 hours" || text42 === "open 24 hours") return "all";
-      return text42.split(/\s*[,;]\s*/).filter(Boolean).map((part) => {
-        const [open, close, extra] = part.split(/\s*[-–—]\s*/);
-        if (!open || !close || extra !== void 0) throw new Error("Hours need one opening and closing time");
-        return range(open, close);
-      });
-    }
-    if (value && typeof value === "object" && !Array.isArray(value)) {
-      const day = value;
-      if (day.enabled === false) return "closed";
-      if (day.allDay === true) return "all";
-      if (!Array.isArray(day.ranges) || !day.ranges.length) return null;
-      const ranges = day.ranges.map((entry) => {
-        if (typeof entry?.open !== "string" || typeof entry?.close !== "string") throw new Error("Hours need opening and closing times");
-        return range(entry.open, entry.close);
-      });
-      if (ranges.length === 1 && ranges[0].start === 0 && ranges[0].end === 23 * 60 + 59) return "all";
-      return ranges;
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-var clock = (minute) => `${String(Math.floor(minute / 60) % 24).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
-function editorWeeklyHours(hours) {
-  if (!hours || typeof hours !== "object" || Array.isArray(hours)) return {};
-  return Object.fromEntries(Object.entries(hours).map(([day, value]) => {
-    const parsed = parseDayHours(value);
-    if (parsed === "closed") return [day, { enabled: false, ranges: [] }];
-    if (parsed === "all") return [day, { enabled: true, allDay: true, ranges: [] }];
-    if (parsed) return [day, { enabled: true, ranges: parsed.map((entry) => ({ open: clock(entry.start), close: clock(entry.end) })) }];
-    return [day, value];
-  }));
-}
-
-// features/keystone/lib/studio-settings-content.ts
-var SETTINGS_LIMITS = {
-  contactTopics: { items: 12, title: 100, details: 12, detail: 300 },
-  facilityHighlights: { items: 12, title: 200, description: 1e3, features: 20, feature: 100 },
-  heroStats: { items: 6, value: 50, label: 100 },
-  hoursJson: 1e4
-};
-var WEEKDAY_KEYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
-var PUBLIC_CTA_PATHS = [
-  /^\/$/,
-  /^\/classes$/,
-  /^\/classes\/[A-Za-z0-9_-]{1,64}$/,
-  /^\/schedule$/,
-  /^\/memberships$/,
-  /^\/join$/,
-  /^\/instructors$/,
-  /^\/instructors\/[A-Za-z0-9_-]{1,64}$/,
-  /^\/facilities$/,
-  /^\/contact$/,
-  /^\/policies$/,
-  /^\/waiver$/,
-  /^\/account$/
-];
-function publicCtaHref(value) {
-  if (typeof value !== "string") return null;
-  const href = value.trim();
-  if (!href.startsWith("/") || href.startsWith("//") || href.includes("\\") || href.includes("..") || /[\u0000-\u001f\u007f]/.test(href) || href.length > 500) return null;
-  let url;
-  try {
-    url = new URL(href, "https://storefront.invalid");
-  } catch {
-    return null;
-  }
-  if (url.origin !== "https://storefront.invalid") return null;
-  return PUBLIC_CTA_PATHS.some((pattern) => pattern.test(url.pathname)) ? `${url.pathname}${url.search}${url.hash}` : null;
-}
-function text21(value, field, max, required = true) {
-  if (value == null || value === "") {
-    if (required) throw new Error(`${field} is required`);
-    return "";
-  }
-  if (typeof value !== "string") throw new Error(`${field} must be text`);
-  const trimmed = value.trim();
-  if (required && !trimmed) throw new Error(`${field} is required`);
-  if (trimmed.length > max) throw new Error(`${field} must be ${max} characters or fewer`);
-  return trimmed;
-}
-function list21(value, field, max) {
-  if (!Array.isArray(value)) throw new Error(`${field} must be a list`);
-  if (value.length > max) throw new Error(`${field} allows at most ${max} entries`);
-  return value;
-}
-function validateContactTopics(value) {
-  const limits = SETTINGS_LIMITS.contactTopics;
-  return list21(value, "Contact cards", limits.items).map((item, index) => {
-    const label = `Contact card ${index + 1}`;
-    const details = list21(item?.details, `${label} details`, limits.details).map((detail, line) => text21(detail, `${label} detail ${line + 1}`, limits.detail));
-    if (!details.length) throw new Error(`${label} needs at least one detail`);
-    return { title: text21(item?.title, `${label} title`, limits.title), details };
-  });
-}
-function validateFacilityHighlights(value) {
-  const limits = SETTINGS_LIMITS.facilityHighlights;
-  return list21(value, "Facility highlights", limits.items).map((item, index) => {
-    const label = `Facility highlight ${index + 1}`;
-    return {
-      title: text21(item?.title, `${label} title`, limits.title),
-      description: text21(item?.description, `${label} description`, limits.description),
-      features: list21(item?.features ?? [], `${label} features`, limits.features).map((feature, line) => text21(feature, `${label} feature ${line + 1}`, limits.feature))
-    };
-  });
-}
-function validateHeroStats(value) {
-  const limits = SETTINGS_LIMITS.heroStats;
-  return list21(value, "Hero stats", limits.items).map((item, index) => ({
-    value: text21(item?.value, `Hero stat ${index + 1} value`, limits.value),
-    label: text21(item?.label, `Hero stat ${index + 1} label`, limits.label)
-  }));
-}
-function validateWeeklyHours(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Opening hours must list each day of the week");
-  const source = value;
-  const output = {};
-  for (const day of WEEKDAY_KEYS) {
-    const parsed = parseDayHours(source[day]);
-    if (!parsed) throw new Error(`Opening hours for ${day[0].toUpperCase()}${day.slice(1)} are missing or unreadable; set closed, all day, or valid times`);
-    output[day] = source[day];
-  }
-  if (JSON.stringify(output).length > SETTINGS_LIMITS.hoursJson) throw new Error("Opening hours are too long");
-  return output;
-}
-
-// features/keystone/mutations/studioSettingsLifecycle.ts
+init_studio_settings_content();
 var STRING_LIMITS = {
   name: 200,
   tagline: 300,
@@ -6527,12 +8245,12 @@ async function upsertStudioSettings(root, { data, expectedUpdatedAt }, context) 
   });
   return saved;
 }
-async function publishStudioParticipationTerms(_root, { text: text42, expectedPolicyId }, context) {
+async function publishStudioParticipationTerms(_root, { text: text43, expectedPolicyId }, context) {
   const session = context.session;
   const organizationId = getTenantId(session);
   if (!session?.itemId || !organizationId) throw new Error("Authentication required");
-  if (typeof text42 !== "string") throw new Error("Participation terms must be text");
-  const body = text42.trim();
+  if (typeof text43 !== "string") throw new Error("Participation terms must be text");
+  const body = text43.trim();
   if (body.length > PARTICIPATION_TERMS_MAX_LENGTH) throw new Error(`Participation terms must be ${PARTICIPATION_TERMS_MAX_LENGTH.toLocaleString("en-US")} characters or fewer`);
   return publishTermsForOrganization(context, organizationId, String(session.itemId), body, expectedPolicyId ?? null, { requirePolicyAuthority: true });
 }
@@ -6559,6 +8277,7 @@ async function publishTermsForOrganization(context, organizationId, userId, body
 }
 
 // features/keystone/models/Instructor.ts
+init_tenantRelationships();
 function certificationProblem(value) {
   if (value == null) return null;
   if (!Array.isArray(value) || value.length > 50) return "Certifications must be a list of up to 50 entries";
@@ -6803,6 +8522,10 @@ var Instructor = (0, import_core21.list)({
 var import_core22 = require("@keystone-6/core");
 var import_access43 = require("@keystone-6/core/access");
 var import_fields24 = require("@keystone-6/core/fields");
+init_access();
+init_trackingFields();
+init_tenantRelationships();
+init_tenantPolicy();
 init_prisma_result();
 var validateClassInstanceTenant = validateTenantOwnership([
   { field: "classSchedule", list: "classSchedule", required: true },
@@ -6941,6 +8664,9 @@ var ClassInstance = (0, import_core22.list)({
 var import_core23 = require("@keystone-6/core");
 var import_access45 = require("@keystone-6/core/access");
 var import_fields25 = require("@keystone-6/core/fields");
+init_tenantPolicy();
+init_trackingFields();
+init_tenantRelationships();
 var canManageFacilities = (args) => canManageTenant(args, "canManageFacilities");
 var tenantItem2 = (args) => tenantItemAccess(args);
 var Room = (0, import_core23.list)({
@@ -7010,6 +8736,9 @@ var Room = (0, import_core23.list)({
       access: { create: import_access45.denyAll, update: import_access45.denyAll },
       ui: { createView: { fieldMode: "hidden" }, itemView: { fieldMode: "read" } }
     }),
+    /** Grid the room map is drawn on: { width, height, instructor: {x,y}, door: {x,y} }. Written by saveRoomLayout. */
+    layout: (0, import_fields25.json)({ defaultValue: { width: 8, height: 4 }, access: { create: import_access45.denyAll, update: import_access45.denyAll } }),
+    spots: (0, import_fields25.relationship)({ ref: "Spot.room", many: true, access: { create: import_access45.denyAll, update: import_access45.denyAll } }),
     appointments: (0, import_fields25.relationship)({
       ref: "Appointment.resource",
       many: true,
@@ -7023,6 +8752,9 @@ var Room = (0, import_core23.list)({
 var import_access46 = require("@keystone-6/core/access");
 var import_core24 = require("@keystone-6/core");
 var import_fields26 = require("@keystone-6/core/fields");
+init_tenantPolicy();
+init_trackingFields();
+init_tenantRelationships();
 var canManageAppointments = (args) => canManageTenant(args, "canManageAppointments");
 var tenantItem3 = (args) => tenantItemAccess(args);
 function canReadInstructorAvailability({ session }) {
@@ -7095,6 +8827,10 @@ var InstructorAvailability = (0, import_core24.list)({
 var import_core25 = require("@keystone-6/core");
 var import_access47 = require("@keystone-6/core/access");
 var import_fields27 = require("@keystone-6/core/fields");
+init_access();
+init_tenantPolicy();
+init_trackingFields();
+init_tenantRelationships();
 function canReadAppointment({ session }) {
   if (canManageTenant({ session }, "canManageAppointments")) {
     return tenantFilter({ session });
@@ -7216,6 +8952,8 @@ var Appointment = (0, import_core25.list)({
 var import_core26 = require("@keystone-6/core");
 var import_access49 = require("@keystone-6/core/access");
 var import_fields29 = require("@keystone-6/core/fields");
+init_tenantRelationships();
+init_trackingFields();
 
 // features/keystone/models/trackingBasis.ts
 var import_fields28 = require("@keystone-6/core/fields");
@@ -7280,6 +9018,8 @@ var OnboardingRun = (0, import_core26.list)({
 var import_core27 = require("@keystone-6/core");
 var import_access50 = require("@keystone-6/core/access");
 var import_fields30 = require("@keystone-6/core/fields");
+init_tenantRelationships();
+init_trackingFields();
 var RefundAttempt = (0, import_core27.list)({
   access: { operation: { query: import_access50.denyAll, create: import_access50.denyAll, update: import_access50.denyAll, delete: import_access50.denyAll } },
   db: {
@@ -7310,6 +9050,8 @@ var RefundAttempt = (0, import_core27.list)({
 var import_core28 = require("@keystone-6/core");
 var import_access51 = require("@keystone-6/core/access");
 var import_fields31 = require("@keystone-6/core/fields");
+init_tenantRelationships();
+init_trackingFields();
 var MembershipBillingAttempt = (0, import_core28.list)({
   access: { operation: { query: import_access51.denyAll, create: import_access51.denyAll, update: import_access51.denyAll, delete: import_access51.denyAll } },
   db: {
@@ -7391,6 +9133,7 @@ var MembershipBillingAttempt = (0, import_core28.list)({
 var import_core29 = require("@keystone-6/core");
 var import_access52 = require("@keystone-6/core/access");
 var import_fields32 = require("@keystone-6/core/fields");
+init_trackingFields();
 var AuthRateLimitBucket = (0, import_core29.list)({
   access: { operation: { query: import_access52.denyAll, create: import_access52.denyAll, update: import_access52.denyAll, delete: import_access52.denyAll } },
   db: {
@@ -7409,6 +9152,10 @@ var AuthRateLimitBucket = (0, import_core29.list)({
 // features/keystone/models/Operations.ts
 var import_core30 = require("@keystone-6/core");
 var import_fields33 = require("@keystone-6/core/fields");
+init_access();
+init_tenantPolicy();
+init_trackingFields();
+init_tenantRelationships();
 var access = {
   operation: { query: permissions.canManageAllRecords, create: () => false, update: () => false, delete: () => false },
   filter: { query: tenantFilter }
@@ -7489,6 +9236,9 @@ var IntegrationCredential = (0, import_core30.list)({ access, fields: {
 var import_core31 = require("@keystone-6/core");
 var import_access54 = require("@keystone-6/core/access");
 var import_fields34 = require("@keystone-6/core/fields");
+init_access();
+init_tenantPolicy();
+init_trackingFields();
 var MembershipCreditGrant = (0, import_core31.list)({
   access: { operation: { query: permissions.canManageAllRecords, create: import_access54.denyAll, update: import_access54.denyAll, delete: import_access54.denyAll }, filter: { query: tenantFilter } },
   fields: {
@@ -7507,6 +9257,9 @@ var MembershipCreditGrant = (0, import_core31.list)({
 var import_core32 = require("@keystone-6/core");
 var import_access56 = require("@keystone-6/core/access");
 var import_fields35 = require("@keystone-6/core/fields");
+init_access();
+init_tenantPolicy();
+init_trackingFields();
 var MembershipCreditEntry = (0, import_core32.list)({
   access: { operation: { query: permissions.canManageAllRecords, create: import_access56.denyAll, update: import_access56.denyAll, delete: import_access56.denyAll }, filter: { query: tenantFilter } },
   fields: {
@@ -7524,6 +9277,10 @@ var MembershipCreditEntry = (0, import_core32.list)({
 var import_core33 = require("@keystone-6/core");
 var import_access58 = require("@keystone-6/core/access");
 var import_fields36 = require("@keystone-6/core/fields");
+init_access();
+init_tenantPolicy();
+init_trackingFields();
+init_tenantRelationships();
 var TrainingPackage = (0, import_core33.list)({
   db: { extendPrismaSchema: compoundUniqueDb("organizationId, purchaseReference") },
   access: {
@@ -7557,6 +9314,10 @@ var TrainingPackage = (0, import_core33.list)({
 var import_core34 = require("@keystone-6/core");
 var import_access60 = require("@keystone-6/core/access");
 var import_fields37 = require("@keystone-6/core/fields");
+init_access();
+init_tenantPolicy();
+init_trackingFields();
+init_tenantRelationships();
 var TrainingCreditEntry = (0, import_core34.list)({
   db: { extendPrismaSchema: compoundUniqueDb("organizationId, eventKey") },
   access: {
@@ -7581,6 +9342,9 @@ var TrainingCreditEntry = (0, import_core34.list)({
 var import_core35 = require("@keystone-6/core");
 var import_access62 = require("@keystone-6/core/access");
 var import_fields38 = require("@keystone-6/core/fields");
+init_tenantPolicy();
+init_trackingFields();
+init_tenantRelationships();
 var canManageMessages = (args) => canManageTenant(args, "canManageCommunications");
 var readOnly = { create: import_access62.denyAll, update: import_access62.denyAll };
 var ContactMessage = (0, import_core35.list)({
@@ -7632,6 +9396,9 @@ var ContactMessage = (0, import_core35.list)({
 var import_core36 = require("@keystone-6/core");
 var import_access63 = require("@keystone-6/core/access");
 var import_fields39 = require("@keystone-6/core/fields");
+init_tenantPolicy();
+init_tenantRelationships();
+init_trackingFields();
 var GiftCard = (0, import_core36.list)({
   access: {
     operation: { query: (args) => canManageTenant(args, "canManageRetail"), create: import_access63.denyAll, update: import_access63.denyAll, delete: import_access63.denyAll },
@@ -7673,6 +9440,10 @@ var GiftCard = (0, import_core36.list)({
 var import_core37 = require("@keystone-6/core");
 var import_access64 = require("@keystone-6/core/access");
 var import_fields40 = require("@keystone-6/core/fields");
+init_access();
+init_tenantPolicy();
+init_trackingFields();
+init_tenantRelationships();
 var MemberImportRecord = (0, import_core37.list)({
   access: { operation: { query: permissions.canManagePeople, create: import_access64.denyAll, update: import_access64.denyAll, delete: import_access64.denyAll }, filter: { query: tenantFilter } },
   hooks: { validateInput: validateTenantOwnership([{ field: "member", list: "member" }]) },
@@ -7694,6 +9465,9 @@ var MemberImportRecord = (0, import_core37.list)({
 var import_core38 = require("@keystone-6/core");
 var import_access66 = require("@keystone-6/core/access");
 var import_fields41 = require("@keystone-6/core/fields");
+init_tenantPolicy();
+init_tenantRelationships();
+init_trackingFields();
 var access2 = { operation: { query: (args) => canManageTenant(args, "canManageRetail"), create: import_access66.denyAll, update: import_access66.denyAll, delete: import_access66.denyAll }, filter: { query: tenantFilter } };
 var organization2 = () => (0, import_fields41.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } });
 var location = () => (0, import_fields41.relationship)({ ref: "Location", db: { extendPrismaSchema: requiredRelationshipDb("location") } });
@@ -7727,6 +9501,8 @@ var RetailClose = (0, import_core38.list)({
 var import_core39 = require("@keystone-6/core");
 var import_access67 = require("@keystone-6/core/access");
 var import_fields42 = require("@keystone-6/core/fields");
+init_tenantRelationships();
+init_trackingFields();
 var CounterPaymentAttempt = (0, import_core39.list)({
   access: { operation: { query: import_access67.denyAll, create: import_access67.denyAll, update: import_access67.denyAll, delete: import_access67.denyAll } },
   db: { extendPrismaSchema: compoundUniqueDb("organizationId, requestKey") },
@@ -7785,6 +9561,8 @@ var CounterPaymentAttempt = (0, import_core39.list)({
 var import_core40 = require("@keystone-6/core");
 var import_access68 = require("@keystone-6/core/access");
 var import_fields43 = require("@keystone-6/core/fields");
+init_tenantRelationships();
+init_trackingFields();
 var StaffIntent = (0, import_core40.list)({
   access: { operation: { query: import_access68.denyAll, create: import_access68.denyAll, update: import_access68.denyAll, delete: import_access68.denyAll } },
   db: { extendPrismaSchema: compoundUniqueDb("organizationId, requestKey") },
@@ -7819,7 +9597,9 @@ var StaffIntent = (0, import_core40.list)({
 });
 
 // features/keystone/models/index.ts
+init_Spot();
 var models = {
+  Spot,
   RetailItem,
   RetailSale,
   RetailReturn,
@@ -7887,6 +9667,8 @@ async function redirectToInit(root, args, context) {
 var redirectToInit_default = redirectToInit;
 
 // features/keystone/queries/billing.ts
+init_tenantPolicy();
+init_timezone();
 init_prisma_result();
 async function getBillingStats(_root, _args, context) {
   if (!context.session?.data?.role?.canManageAllRecords) {
@@ -8039,14 +9821,14 @@ function qrSecret() {
   }
   return secret;
 }
-function generateQRSignature(memberId, organizationId, timestamp30) {
-  const data = `${organizationId}:${memberId}:${timestamp30}`;
+function generateQRSignature(memberId, organizationId, timestamp31) {
+  const data = `${organizationId}:${memberId}:${timestamp31}`;
   return import_crypto.default.createHmac("sha256", qrSecret()).update(data).digest("hex");
 }
 function createQRCodeData(memberId, organizationId) {
-  const timestamp30 = Date.now();
-  const signature = generateQRSignature(memberId, organizationId, timestamp30);
-  return { memberId, organizationId, timestamp: timestamp30, signature };
+  const timestamp31 = Date.now();
+  const signature = generateQRSignature(memberId, organizationId, timestamp31);
+  return { memberId, organizationId, timestamp: timestamp31, signature };
 }
 function encodeQRData(data) {
   return Buffer.from(JSON.stringify(data)).toString("base64url");
@@ -8251,7 +10033,7 @@ async function getMemberCheckInCode(_root, _args, context) {
     error: null
   };
 }
-var UPCOMING_STATUSES = /* @__PURE__ */ new Set(["confirmed", "waitlist"]);
+var UPCOMING_STATUSES = /* @__PURE__ */ new Set(["confirmed", "waitlisted"]);
 async function getMyUpcomingBookingPage(_root, { status, skip = 0, take = 20, before }, context) {
   const { userId, organizationId } = actor(context);
   if (!UPCOMING_STATUSES.has(status)) throw new Error("Choose confirmed or waitlist bookings");
@@ -8371,6 +10153,9 @@ async function confirmEmailChange(_root, { token }, context) {
   if (mailDeliveryEnabled() && changed.previous) await sendEmailChangedNotice(changed.previous).catch(() => void 0);
   return true;
 }
+
+// features/keystone/queries/scheduling.ts
+init_timezone();
 
 // features/keystone/lib/scheduling-time.ts
 var TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
@@ -8547,31 +10332,9 @@ async function getSchedulingWorkspace(_root, { start, end, userId }, context) {
   };
 }
 
-// features/keystone/access/currentRoleActor.ts
-async function currentRoleActor(context) {
-  const session = context.session;
-  const organizationId = getTenantId(session);
-  if (!session?.itemId || !organizationId) throw new Error("Organization session required");
-  const user = await context.query.User.findOne({
-    where: { id: session.itemId },
-    query: "id organization { id } role { id canManageAllRecords canManagePeople canManageCheckIns canManageFacilities isInstructor organization { id } }"
-  });
-  if (!user || user.organization?.id !== organizationId || user.role && user.role.organization?.id !== organizationId) {
-    throw new Error("Actor organization mismatch");
-  }
-  const role = user.role;
-  return {
-    userId: session.itemId,
-    organizationId,
-    canManageAllRecords: Boolean(role?.canManageAllRecords),
-    canManagePeople: Boolean(role?.canManagePeople),
-    canManageCheckIns: Boolean(role?.canManageCheckIns),
-    canManageFacilities: Boolean(role?.canManageFacilities),
-    isInstructor: Boolean(role?.isInstructor)
-  };
-}
-
 // features/keystone/queries/rosters.ts
+init_currentRoleActor();
+init_timezone();
 function rosterActor(context) {
   const session = context.session;
   const organizationId = session?.data?.organization?.id;
@@ -8606,7 +10369,7 @@ var ROSTER_ORGANIZATION_PROJECTION = "name timezone";
 var ROSTER_SESSION_PROJECTION = `
   id date maxCapacity isCancelled
   bookingsCount: bookingsCount(where: { status: { equals: "confirmed" } })
-  waitlistCount: bookingsCount(where: { status: { equals: "waitlist" } })
+  waitlistCount: bookingsCount(where: { status: { equals: "waitlisted" } })
   location { id name address }
   classSchedule { id name maxCapacity startTime endTime instructor { user { name } } location { id name address } }
   instructor { user { name } }
@@ -8714,18 +10477,18 @@ async function getRosterSessions(_root, args, context) {
   const from = localDayBound(args.from, timeZone, false) || new Date(now.getTime() - 24 * 60 * 60 * 1e3);
   const to = localDayBound(args.to, timeZone, true);
   if (to && to <= from) throw new Error("The end date must be on or after the start date");
-  const text42 = (path) => path({ contains: q, mode: "insensitive" });
+  const text43 = (path) => path({ contains: q, mode: "insensitive" });
   const base = [
     { organization: { id: { equals: actor2.organizationId } } },
     { date: { gte: from.toISOString() } },
     ...to ? [{ date: { lt: to.toISOString() } }] : [],
     ...actor2.instructorOnly ? [assignmentFilter(actor2.userId)] : [],
     ...q ? [{ OR: [
-      text42((match) => ({ classSchedule: { name: match } })),
-      text42((match) => ({ instructor: { user: { name: match } } })),
-      text42((match) => ({ AND: [{ instructor: null }, { classSchedule: { instructor: { user: { name: match } } } }] })),
-      text42((match) => ({ location: { name: match } })),
-      text42((match) => ({ AND: [{ location: null }, { classSchedule: { location: { name: match } } }] }))
+      text43((match) => ({ classSchedule: { name: match } })),
+      text43((match) => ({ instructor: { user: { name: match } } })),
+      text43((match) => ({ AND: [{ instructor: null }, { classSchedule: { instructor: { user: { name: match } } } }] })),
+      text43((match) => ({ location: { name: match } })),
+      text43((match) => ({ AND: [{ location: null }, { classSchedule: { location: { name: match } } }] }))
     ] }] : []
   ];
   const nowIso = now.toISOString();
@@ -8838,8 +10601,8 @@ async function getRosterDetail(_root, { classInstanceId, confirmedSkip = 0, wait
   const inSession = [{ classInstance: { id: { equals: instance.id } } }, { organization: { id: { equals: actor2.organizationId } } }];
   const groups = {
     confirmed: [{ status: { equals: "confirmed" } }],
-    waitlist: [{ status: { equals: "waitlist" } }],
-    other: [{ status: { notIn: ["confirmed", "waitlist"] } }]
+    waitlist: [{ status: { equals: "waitlisted" } }],
+    other: [{ status: { notIn: ["confirmed", "waitlisted"] } }]
   };
   const page = async (extra, requested) => {
     const total = await sudo.query.ClassBooking.count({ where: { AND: [...inSession, ...extra] } });
@@ -8906,6 +10669,7 @@ async function getRosterDetail(_root, { classInstanceId, confirmedSkip = 0, wait
 }
 
 // features/keystone/access/currentCheckInActor.ts
+init_currentRoleActor();
 async function currentCheckInActor(context) {
   const actor2 = await currentRoleActor(context);
   if (!actor2.canManageAllRecords && !actor2.canManageFacilities && !actor2.canManageCheckIns) {
@@ -9014,6 +10778,7 @@ async function getFrontDeskWorkspace(_root, { query, visitQuery, visitLocationId
 }
 
 // features/keystone/queries/reports.ts
+init_timezone();
 init_prisma_result();
 function reportManager(context) {
   const session = context.session;
@@ -9124,7 +10889,7 @@ async function getReportsDashboard(_root, _args, context) {
   const settledPayments = completedPaymentAggregate._count._all;
   const utilization = upcomingInstances.map((instance) => {
     const confirmedBookings = (instance.bookings || []).filter((booking) => booking.status === "confirmed").length;
-    const waitlistCount = (instance.bookings || []).filter((booking) => booking.status === "waitlist").length;
+    const waitlistCount = (instance.bookings || []).filter((booking) => booking.status === "waitlisted").length;
     const maxCapacity = instance.maxCapacity ?? instance.classSchedule?.maxCapacity ?? 0;
     return {
       id: instance.id,
@@ -9179,562 +10944,11 @@ async function getReportsDashboard(_root, _args, context) {
   };
 }
 
-// features/keystone/mutations/trainerQualifications.ts
-function qualificationSummary(entry, at = /* @__PURE__ */ new Date()) {
-  if (typeof entry === "string") return entry.trim() ? { name: entry.trim().slice(0, 200), status: "listed" } : null;
-  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
-  const item = entry;
-  const name = typeof item.name === "string" ? item.name.trim().slice(0, 200) : "";
-  if (!name) return null;
-  if (item.revoked === true) return { name, status: "revoked" };
-  const expiresAt = item.expiresAt ? new Date(String(item.expiresAt)) : null;
-  if (expiresAt && Number.isFinite(expiresAt.getTime()) && expiresAt <= at) return { name, status: "expired" };
-  const verifiedAt = item.verifiedAt ? new Date(String(item.verifiedAt)) : null;
-  if (item.required === true && !(verifiedAt && Number.isFinite(verifiedAt.getTime()) && verifiedAt <= at)) return { name, status: "unverified" };
-  return { name, status: "current" };
-}
-function publicQualificationNames(value, at = /* @__PURE__ */ new Date()) {
-  return (Array.isArray(value) ? value : []).map((entry) => qualificationSummary(entry, at)).filter((entry) => Boolean(entry) && (entry.status === "listed" || entry.status === "current")).map((entry) => entry.name).slice(0, 50);
-}
-function assertInstructorQualifications(instructor, at) {
-  const entries = Array.isArray(instructor.certifications) ? instructor.certifications : [];
-  for (const entry of entries) {
-    if (!entry || typeof entry !== "object" || entry.required !== true) continue;
-    const expiresAt = new Date(entry.expiresAt);
-    const verifiedAt = new Date(entry.verifiedAt);
-    if (!entry.name || !entry.evidenceReference || !Number.isFinite(expiresAt.getTime()) || expiresAt <= at || !Number.isFinite(verifiedAt.getTime()) || verifiedAt > at || entry.revoked === true) throw new Error("A required instructor qualification is expired, revoked or unverified");
-  }
-}
-
-// features/keystone/queries/publicStudio.ts
-init_stripe_environment_provider();
-init_participation_terms();
-init_prisma_result();
-var DEFAULT_INSTANCE_WINDOW_DAYS = 14;
-var MAX_INSTANCE_WINDOW_DAYS = 90;
-var DEFAULT_LIST_LIMIT = 50;
-var MAX_LIST_LIMIT = 100;
-function documentToPlainText(value) {
-  if (!value) return null;
-  if (typeof value === "string") return value.trim() || null;
-  if (typeof value !== "object") return null;
-  const document4 = value.document;
-  const text42 = document4?.flatMap((node) => node.children ?? []).map((child) => typeof child.text === "string" ? child.text : "").join(" ").replace(/\s+/g, " ").trim();
-  return text42 || null;
-}
-function normalizePublicLimit(value) {
-  if (!Number.isFinite(value)) return DEFAULT_LIST_LIMIT;
-  return Math.min(Math.max(Math.trunc(value), 1), MAX_LIST_LIMIT);
-}
-function publicSkip(value) {
-  return Number.isInteger(value) && value > 0 ? Math.min(value, 5e3) : 0;
-}
-async function afterCursor(context, listKey, organizationId, after, field) {
-  if (!after) return {};
-  const [anchor] = await publicContext(context).query[listKey].findMany({
-    where: publicTenantWhere(organizationId, { id: { equals: after } }),
-    take: 1,
-    query: field ? `id ${field}` : "id"
-  });
-  if (!anchor) return { id: { equals: "__no_public_cursor__" } };
-  if (!field) return { id: { gt: after } };
-  return { OR: [{ [field]: { gt: anchor[field] } }, { AND: [{ [field]: { equals: anchor[field] } }, { id: { gt: after } }] }] };
-}
-var containsText = (value) => ({ contains: value, mode: "insensitive" });
-var CLASS_LEVELS = ["beginner", "intermediate", "advanced", "all-levels"];
-function resolvePublicInstanceWindow(from, to, now = /* @__PURE__ */ new Date()) {
-  const requestedStart = from ? new Date(from) : now;
-  if (Number.isNaN(requestedStart.getTime())) throw new Error("Invalid public class start date.");
-  const start = new Date(Math.max(requestedStart.getTime(), now.getTime()));
-  const maximumEnd = new Date(start.getTime() + MAX_INSTANCE_WINDOW_DAYS * 24 * 60 * 60 * 1e3);
-  const requestedEnd = to ? new Date(to) : new Date(start.getTime() + DEFAULT_INSTANCE_WINDOW_DAYS * 24 * 60 * 60 * 1e3);
-  if (Number.isNaN(requestedEnd.getTime())) throw new Error("Invalid public class end date.");
-  if (requestedEnd < start) throw new Error("Public class end date must be after the start date.");
-  return {
-    from: start.toISOString(),
-    to: new Date(Math.min(requestedEnd.getTime(), maximumEnd.getTime())).toISOString()
-  };
-}
-function normalizePublicMediaPath(value) {
-  if (typeof value !== "string") return null;
-  const path = value.trim();
-  if (!path.startsWith("/images/") || path.startsWith("//") || path.includes("..") || path.includes("?") || path.includes("#") || path.includes("\\")) {
-    return null;
-  }
-  return path;
-}
-function publicText(value, limit) {
-  if (typeof value !== "string") return null;
-  const text42 = value.trim();
-  return text42 ? text42.slice(0, limit) : null;
-}
-function publicInternalHref(value) {
-  return publicCtaHref(value);
-}
-function publicHours(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const serialized = JSON.stringify(value);
-  if (serialized.length > 1e4) return null;
-  return JSON.parse(serialized);
-}
-function publicHeroStats(value) {
-  if (!Array.isArray(value)) return [];
-  return value.slice(0, 6).flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const valueText = publicText(item.value, 50);
-    const label = publicText(item.label, 100);
-    return valueText && label ? [{ value: valueText, label }] : [];
-  });
-}
-function publicContactTopics(value) {
-  if (!Array.isArray(value)) return [];
-  return value.slice(0, 12).flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const title = publicText(item.title, 100);
-    const details = Array.isArray(item.details) ? item.details.slice(0, 12).flatMap((detail) => {
-      const text42 = publicText(detail, 300);
-      return text42 ? [text42] : [];
-    }) : [];
-    return title && details.length ? [{ title, details }] : [];
-  });
-}
-function publicFacilityHighlights(value) {
-  if (!Array.isArray(value)) return [];
-  return value.slice(0, 12).flatMap((item) => {
-    if (!item || typeof item !== "object") return [];
-    const title = publicText(item.title, 200);
-    const description = publicText(item.description, 1e3);
-    const features = Array.isArray(item.features) ? item.features.slice(0, 20).flatMap((feature) => {
-      const text42 = publicText(feature, 100);
-      return text42 ? [text42] : [];
-    }) : [];
-    return title && description ? [{ title, description, features }] : [];
-  });
-}
-function projectPublicStudioSettings(settings, organizationTimeZone) {
-  if (!settings) return null;
-  const name = publicText(settings.name, 200);
-  if (!name) return null;
-  const logoIcon = sanitizeStoreLogoSvg(settings.logoIcon);
-  return {
-    id: String(settings.id),
-    name,
-    tagline: publicText(settings.tagline, 300),
-    logoIcon: logoIcon || null,
-    logoColor: normalizeStudioLogoColor(settings.logoColor),
-    brandHue: normalizeStorefrontHue(settings.brandHue),
-    description: publicText(settings.description, 2e3),
-    address: publicText(settings.address, 500),
-    phone: publicText(settings.phone, 50),
-    email: publicText(settings.email, 320),
-    currencyCode: publicText(settings.currencyCode, 3),
-    dropInPrice: Number.isInteger(settings.dropInPrice) && settings.dropInPrice >= 50 ? settings.dropInPrice : 0,
-    lateCancelHours: Number.isInteger(settings.lateCancelHours) && settings.lateCancelHours > 0 ? Math.min(settings.lateCancelHours, 72) : 0,
-    locale: publicText(settings.locale, 20),
-    timezone: resolveStudioTimeZone(
-      publicText(settings.timezone, 100),
-      publicText(organizationTimeZone, 100)
-    ),
-    countryCode: publicText(settings.countryCode, 2),
-    hours: publicHours(settings.hours),
-    heroEyebrow: publicText(settings.heroEyebrow, 200),
-    heroHeadline: publicText(settings.heroHeadline, 1e3),
-    heroSubheadline: publicText(settings.heroSubheadline, 2e3),
-    heroImagePath: normalizePublicMediaPath(settings.heroImageUrl),
-    heroPrimaryCtaLabel: publicText(settings.heroPrimaryCtaLabel, 100),
-    heroPrimaryCtaHref: publicInternalHref(settings.heroPrimaryCtaHref),
-    heroSecondaryCtaLabel: publicText(settings.heroSecondaryCtaLabel, 100),
-    heroSecondaryCtaHref: publicInternalHref(settings.heroSecondaryCtaHref),
-    promoBanner: publicText(settings.promoBanner, 500),
-    footerTagline: publicText(settings.footerTagline, 500),
-    copyrightName: publicText(settings.copyrightName, 200),
-    facilityHeadline: publicText(settings.facilityHeadline, 300),
-    facilityDescription: publicText(settings.facilityDescription, 2e3),
-    facilityHighlights: publicFacilityHighlights(settings.facilityHighlights),
-    heroStats: publicHeroStats(settings.heroStats),
-    contactTopics: publicContactTopics(settings.contactTopics)
-  };
-}
-function publicContext(context) {
-  return context.sudo();
-}
-async function publicOrganizationId(context) {
-  const configuredId = process.env.STOREFRONT_ORGANIZATION_ID?.trim();
-  const organizations = await publicContext(context).query.Organization.findMany({
-    where: configuredId ? { AND: [{ id: { equals: configuredId } }, { status: { equals: "active" } }] } : { status: { equals: "active" } },
-    take: configuredId ? 1 : 2,
-    orderBy: [{ createdAt: "asc" }],
-    query: "id"
-  });
-  if (!configuredId && organizations.length !== 1) return null;
-  return organizations[0]?.id ?? null;
-}
-async function configuredStorefrontOrganization(context) {
-  const configuredId = process.env.STOREFRONT_ORGANIZATION_ID?.trim();
-  if (configuredId) {
-    const rows = await publicContext(context).query.Organization.findMany({ where: { id: { equals: configuredId } }, take: 1, query: "id status" });
-    return rows[0] ? { id: String(rows[0].id), salesOpen: rows[0].status === "active" } : null;
-  }
-  const active = await publicContext(context).query.Organization.findMany({ where: { status: { equals: "active" } }, take: 2, orderBy: [{ createdAt: "asc" }], query: "id" });
-  if (active.length === 1) return { id: String(active[0].id), salesOpen: true };
-  if (active.length > 1) return null;
-  const all = await publicContext(context).query.Organization.findMany({ take: 2, orderBy: [{ createdAt: "asc" }], query: "id" });
-  return all.length === 1 ? { id: String(all[0].id), salesOpen: false } : null;
-}
-function publicTenantWhere(organizationId, where = {}) {
-  if (!organizationId) return { id: { equals: "__no_public_organization__" } };
-  return {
-    AND: [
-      { organization: { id: { equals: organizationId } } },
-      where
-    ]
-  };
-}
-function publicInstructor(instructor) {
-  if (!instructor) return null;
-  return {
-    id: instructor.id,
-    name: instructor.displayName || instructor.user?.name || "Instructor",
-    bio: documentToPlainText(instructor.bio),
-    specialties: Array.isArray(instructor.specialties) ? instructor.specialties.map(String) : [],
-    // Names of listed and current qualifications only; evidence and verification stay private.
-    certifications: publicQualificationNames(instructor.certifications),
-    imagePath: normalizePublicMediaPath(instructor.photo)
-  };
-}
-function publicSchedule(schedule) {
-  if (!schedule) return null;
-  return {
-    id: schedule.id,
-    name: schedule.name,
-    description: schedule.description || null,
-    dayOfWeek: schedule.dayOfWeek,
-    startTime: schedule.startTime,
-    endTime: schedule.endTime,
-    maxCapacity: schedule.maxCapacity,
-    classType: publicClassType(schedule.classType),
-    instructor: publicInstructor(schedule.instructor)
-  };
-}
-function publicClassType(classType) {
-  if (!classType) return null;
-  return {
-    id: classType.id,
-    name: classType.name,
-    description: documentToPlainText(classType.description),
-    difficulty: classType.difficulty,
-    duration: classType.duration,
-    caloriesBurn: classType.caloriesBurn ?? null,
-    equipmentNeeded: Array.isArray(classType.equipmentNeeded) ? classType.equipmentNeeded.map(String) : []
-  };
-}
-function publicMembershipTier(tier, providerEnabled = false) {
-  if (!tier) return null;
-  return {
-    id: tier.id,
-    name: tier.name,
-    description: documentToPlainText(tier.description),
-    monthlyPrice: tier.monthlyPrice,
-    annualPrice: tier.annualPrice,
-    classCreditsPerMonth: tier.classCreditsPerMonth,
-    guestPasses: tier.guestPasses,
-    personalTrainingSessions: tier.personalTrainingSessions,
-    freezeAllowed: tier.freezeAllowed,
-    contractLength: tier.contractLength,
-    features: Array.isArray(tier.features) ? tier.features.filter((item) => typeof item === "string" && Boolean(item.trim())).slice(0, 12).map((item) => item.slice(0, 120)) : [],
-    // A plan is purchasable only with a mapped price above zero (paid-only service).
-    monthlyCheckoutAvailable: providerEnabled && Boolean(tier.stripeProductId) && Boolean(tier.stripeMonthlyPriceId) && Number(tier.monthlyPrice) > 0,
-    annualCheckoutAvailable: providerEnabled && Boolean(tier.stripeProductId) && Boolean(tier.stripeAnnualPriceId) && Number(tier.annualPrice) > 0
-  };
-}
-function publicClassInstance(instance) {
-  if (!instance) return null;
-  const confirmedBookings = (instance.bookings ?? []).filter(
-    (booking) => booking.status === "confirmed"
-  ).length;
-  const waitlistCount = (instance.bookings ?? []).filter(
-    (booking) => booking.status === "waitlist"
-  ).length;
-  const maxCapacity = instance.maxCapacity ?? instance.classSchedule?.maxCapacity ?? 0;
-  const instructor = instance.instructor ?? instance.classSchedule?.instructor ?? null;
-  const site = instance.location ?? instance.classSchedule?.location ?? null;
-  return {
-    id: instance.id,
-    startsAt: instance.date,
-    schedule: publicSchedule(instance.classSchedule),
-    instructor: publicInstructor(instructor),
-    location: site ? { id: site.id, name: publicText(site.name, 200) || "Location", address: publicText(site.address, 500) } : null,
-    availability: {
-      maxCapacity,
-      confirmedBookings,
-      waitlistCount,
-      spotsRemaining: Math.max(maxCapacity - confirmedBookings, 0),
-      state: maxCapacity > confirmedBookings ? "open" : "waitlist"
-    }
-  };
-}
-async function getPublicStudioSettings(root, args, context) {
-  const storefront = await configuredStorefrontOrganization(context);
-  const organizationId = storefront?.id ?? null;
-  const [settingsItems, organizations] = await Promise.all([
-    publicContext(context).query.StudioSettings.findMany({
-      where: publicTenantWhere(organizationId),
-      take: 1,
-      query: `
-        id
-        name
-        tagline
-        logoIcon
-        logoColor
-        brandHue
-        description
-        address
-        phone
-        email
-        currencyCode
-        dropInPrice
-        lateCancelHours
-        locale
-        timezone
-        countryCode
-        hours
-        heroEyebrow
-        heroHeadline
-        heroSubheadline
-        heroImageUrl
-        heroPrimaryCtaLabel
-        heroPrimaryCtaHref
-        heroSecondaryCtaLabel
-        heroSecondaryCtaHref
-        promoBanner
-        footerTagline
-        copyrightName
-        facilityHeadline
-        facilityDescription
-        facilityHighlights
-        heroStats
-        contactTopics
-      `
-    }),
-    organizationId ? publicContext(context).query.Organization.findMany({
-      where: { id: { equals: organizationId } },
-      take: 1,
-      query: "timezone"
-    }) : Promise.resolve([])
-  ]);
-  const settings = settingsItems[0];
-  const organization3 = organizations[0];
-  const projected = projectPublicStudioSettings(settings, organization3?.timezone);
-  if (!projected) return null;
-  const participationTerms = await currentParticipationTerms(guardKeystonePrismaResults(context.prisma), organizationId);
-  return { ...projected, participationTerms, salesOpen: Boolean(storefront?.salesOpen) };
-}
-async function getPublicStudioClassTypes(root, args, context) {
-  const organizationId = await publicOrganizationId(context);
-  const filters = [await afterCursor(context, "ClassType", organizationId, args.after, "name")];
-  const q = String(args.q || "").trim().slice(0, 100);
-  if (q) filters.push({ name: containsText(q) });
-  if (args.difficulty && args.difficulty !== "all") filters.push({ difficulty: { equals: String(args.difficulty).slice(0, 50) } });
-  if (args.duration && args.duration !== "all") {
-    const minutes = Number(args.duration);
-    if (Number.isInteger(minutes) && minutes > 0) filters.push({ duration: minutes >= 75 ? { gte: 75 } : { equals: minutes } });
-  }
-  const records = await publicContext(context).query.ClassType.findMany({
-    where: publicTenantWhere(organizationId, { AND: filters }),
-    take: normalizePublicLimit(args.limit),
-    skip: args.after ? 0 : publicSkip(args.skip),
-    orderBy: [{ name: "asc" }, { id: "asc" }],
-    query: `id name description { document } difficulty duration caloriesBurn equipmentNeeded`
-  });
-  return records.map(publicClassType);
-}
-async function getPublicStudioClassType(root, args, context) {
-  const organizationId = await publicOrganizationId(context);
-  const [record2] = await publicContext(context).query.ClassType.findMany({
-    where: publicTenantWhere(organizationId, { id: { equals: args.id } }),
-    take: 1,
-    query: `id name description { document } difficulty duration caloriesBurn equipmentNeeded`
-  });
-  return publicClassType(record2);
-}
-async function getPublicStudioSchedules(root, args, context) {
-  const organizationId = await publicOrganizationId(context);
-  const records = await publicContext(context).query.ClassSchedule.findMany({
-    where: publicTenantWhere(organizationId, {
-      isActive: { equals: true },
-      ...args.dayOfWeek ? { dayOfWeek: { equals: args.dayOfWeek } } : {},
-      ...args.instructorId ? { instructor: { id: { equals: args.instructorId } } } : {}
-    }),
-    take: normalizePublicLimit(args.limit),
-    orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
-    query: `
-      id name description dayOfWeek startTime endTime maxCapacity
-      classType { id name description { document } difficulty duration caloriesBurn equipmentNeeded }
-      instructor { id displayName bio { document } specialties certifications photo }
-    `
-  });
-  return records.map(publicSchedule);
-}
-async function getPublicStudioSchedule(root, args, context) {
-  const organizationId = await publicOrganizationId(context);
-  const [record2] = await publicContext(context).query.ClassSchedule.findMany({
-    where: publicTenantWhere(organizationId, { id: { equals: args.id } }),
-    take: 1,
-    query: `
-      id name description dayOfWeek startTime endTime maxCapacity isActive
-      classType { id name description { document } difficulty duration caloriesBurn equipmentNeeded }
-      instructor { id displayName bio { document } specialties certifications photo }
-    `
-  });
-  return record2?.isActive ? publicSchedule(record2) : null;
-}
-async function getPublicStudioClassInstances(root, args, context) {
-  const organizationId = await publicOrganizationId(context);
-  const window = resolvePublicInstanceWindow(args.from, args.to);
-  const skip = Number.isInteger(args.skip) && args.skip > 0 ? Math.min(args.skip, 5e3) : 0;
-  const filters = [];
-  if (args.instructorId) filters.push({ OR: [
-    { instructor: { id: { equals: args.instructorId } } },
-    { AND: [{ instructor: null }, { classSchedule: { instructor: { id: { equals: args.instructorId } } } }] }
-  ] });
-  if (args.locationId) filters.push({ OR: [
-    { location: { id: { equals: args.locationId } } },
-    { AND: [{ location: null }, { classSchedule: { location: { id: { equals: args.locationId } } } }] }
-  ] });
-  for (const term of String(args.search || "").trim().toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6)) {
-    const text42 = containsText(term.slice(0, 60));
-    const levels = CLASS_LEVELS.filter((level) => level.startsWith(term));
-    filters.push({ OR: [
-      { classSchedule: { name: text42 } },
-      { classSchedule: { classType: { name: text42 } } },
-      ...levels.length ? [{ classSchedule: { classType: { difficulty: { in: levels } } } }] : [],
-      { instructor: { user: { name: text42 } } },
-      { AND: [{ instructor: null }, { classSchedule: { instructor: { user: { name: text42 } } } }] }
-    ] });
-  }
-  const records = await publicContext(context).query.ClassInstance.findMany({
-    where: publicTenantWhere(organizationId, {
-      date: { gte: window.from, lte: window.to },
-      isCancelled: { equals: false },
-      classSchedule: {
-        isActive: { equals: true },
-        ...args.scheduleId ? { id: { equals: args.scheduleId } } : {},
-        ...args.classTypeId ? { classType: { id: { equals: args.classTypeId } } } : {}
-      },
-      ...filters.length ? { AND: filters } : {}
-    }),
-    take: normalizePublicLimit(args.limit),
-    skip,
-    orderBy: [{ date: "asc" }, { id: "asc" }],
-    query: `
-      id date maxCapacity
-      location { id name address isActive }
-      instructor { id displayName bio { document } specialties certifications photo }
-      classSchedule {
-        id name description dayOfWeek startTime endTime maxCapacity
-        location { id name address isActive }
-        classType { id name description { document } difficulty duration caloriesBurn equipmentNeeded }
-        instructor { id displayName bio { document } specialties certifications photo }
-      }
-      bookings { id status }
-    `
-  });
-  return records.map(publicClassInstance);
-}
-async function getPublicStudioClassInstance(root, args, context) {
-  const organizationId = await publicOrganizationId(context);
-  const [record2] = await publicContext(context).query.ClassInstance.findMany({
-    where: publicTenantWhere(organizationId, { id: { equals: args.id } }),
-    take: 1,
-    query: `
-      id date maxCapacity isCancelled
-      location { id name address isActive }
-      instructor { id displayName bio { document } specialties certifications photo }
-      classSchedule {
-        id name description dayOfWeek startTime endTime maxCapacity isActive
-        location { id name address isActive }
-        classType { id name description { document } difficulty duration caloriesBurn equipmentNeeded }
-        instructor { id displayName bio { document } specialties certifications photo }
-      }
-      bookings { id status }
-    `
-  });
-  if (!record2 || record2.isCancelled || !record2.classSchedule?.isActive || new Date(record2.date).getTime() < Date.now()) {
-    return null;
-  }
-  return publicClassInstance(record2);
-}
-async function getPublicStudioInstructors(root, args, context) {
-  const organizationId = await publicOrganizationId(context);
-  const records = await publicContext(context).query.Instructor.findMany({
-    where: publicTenantWhere(organizationId, { AND: [{ isActive: { equals: true } }, await afterCursor(context, "Instructor", organizationId, args.after, null)] }),
-    take: normalizePublicLimit(args.limit),
-    skip: args.after ? 0 : publicSkip(args.skip),
-    orderBy: [{ id: "asc" }],
-    query: `id displayName bio { document } specialties certifications photo`
-  });
-  return records.map(publicInstructor).filter((instructor) => Boolean(instructor));
-}
-async function getPublicStudioInstructor(root, args, context) {
-  const organizationId = await publicOrganizationId(context);
-  const [record2] = await publicContext(context).query.Instructor.findMany({
-    where: publicTenantWhere(organizationId, { id: { equals: args.id } }),
-    take: 1,
-    query: `id displayName bio { document } specialties certifications photo isActive`
-  });
-  return record2?.isActive ? publicInstructor(record2) : null;
-}
-async function publicCheckoutProviderEnabled(context, organizationId) {
-  if (!organizationId) return false;
-  const providers = await publicContext(context).query.PaymentProvider.findMany({
-    where: publicTenantWhere(organizationId, {
-      AND: [{ code: { equals: "pp_stripe" } }, installedPaymentProviderWhere()]
-    }),
-    take: 1,
-    query: "id adapterKey"
-  });
-  const provider = providers[0];
-  if (!provider) return false;
-  return provider.adapterKey !== "stripe" || newPaymentChargesEnabled();
-}
-async function getPublicStudioMembershipTiers(root, args, context) {
-  const organizationId = await publicOrganizationId(context);
-  const providerEnabled = await publicCheckoutProviderEnabled(context, organizationId);
-  const mapped = { not: { equals: "" } };
-  const purchasable = providerEnabled ? [{ stripeProductId: mapped }, { OR: [
-    { AND: [{ stripeMonthlyPriceId: mapped }, { monthlyPrice: { gt: 0 } }] },
-    { AND: [{ stripeAnnualPriceId: mapped }, { annualPrice: { gt: 0 } }] }
-  ] }] : [];
-  const records = await publicContext(context).query.MembershipTier.findMany({
-    where: publicTenantWhere(organizationId, { AND: [...purchasable, await afterCursor(context, "MembershipTier", organizationId, args.after, "monthlyPrice")] }),
-    take: normalizePublicLimit(args.limit),
-    skip: args.after ? 0 : publicSkip(args.skip),
-    orderBy: [{ monthlyPrice: "asc" }, { id: "asc" }],
-    query: `
-      id name description { document } monthlyPrice annualPrice classCreditsPerMonth
-      guestPasses personalTrainingSessions freezeAllowed contractLength
-      stripeMonthlyPriceId stripeAnnualPriceId stripeProductId features
-    `
-  });
-  return records.map((record2) => publicMembershipTier(record2, providerEnabled)).filter((tier) => !providerEnabled || tier.monthlyCheckoutAvailable || tier.annualCheckoutAvailable);
-}
-async function getPublicStudioMembershipTier(root, args, context) {
-  const organizationId = await publicOrganizationId(context);
-  const providerEnabled = await publicCheckoutProviderEnabled(context, organizationId);
-  const [record2] = await publicContext(context).query.MembershipTier.findMany({
-    where: publicTenantWhere(organizationId, { id: { equals: args.id } }),
-    take: 1,
-    query: `
-      id name description { document } monthlyPrice annualPrice classCreditsPerMonth
-      guestPasses personalTrainingSessions freezeAllowed contractLength
-      stripeMonthlyPriceId stripeAnnualPriceId stripeProductId features
-    `
-  });
-  const tier = publicMembershipTier(record2, providerEnabled);
-  return tier && (!providerEnabled || tier.monthlyCheckoutAvailable || tier.annualCheckoutAvailable) ? tier : null;
-}
+// features/keystone/mutations/index.ts
+init_publicStudio();
 
 // features/keystone/mutations/classBooking.ts
+init_currentRoleActor();
 init_classCapacity();
 async function checkClassAvailability(root, args, context) {
   const { classInstanceId } = args;
@@ -9778,7 +10992,7 @@ async function checkClassAvailability(root, args, context) {
       where: {
         classInstance: { id: { equals: classInstanceId } },
         organization: { id: { equals: organizationId } },
-        status: { equals: "waitlist" }
+        status: { equals: "waitlisted" }
       }
     });
     waitlistPosition = waitlistCount + 1;
@@ -9796,22 +11010,13 @@ async function currentOperatorActor(context) {
   return actor2;
 }
 async function bookClass(root, args, context) {
-  const actor2 = await currentRoleActor(context);
-  const { classInstanceId, memberId } = args;
-  const organizationId = actor2.organizationId;
-  const result = await createCapacityControlledBooking(context.prisma, {
-    classInstanceId,
-    memberId,
-    actorUserId: actor2.userId,
-    actorOrganizationId: organizationId,
-    actorCanManageAllRecords: actor2.canManageAllRecords,
-    capacityMode: "waitlist"
-  });
+  const { bookClassWithSpot: bookClassWithSpot2 } = await Promise.resolve().then(() => (init_rooms(), rooms_exports));
+  const result = await bookClassWithSpot2(root, args, context);
   const booking = await context.sudo().query.ClassBooking.findOne({
     where: { id: result.bookingId },
     query: "id status waitlistPosition bookedAt"
   });
-  return { booking, creditsRemaining: result.creditsRemaining };
+  return { ...result, booking };
 }
 async function promoteFromWaitlist(root, args, context) {
   const actor2 = await currentOperatorActor(context);
@@ -9828,6 +11033,9 @@ async function promoteFromWaitlist(root, args, context) {
   });
   return { ...result, booking };
 }
+
+// features/keystone/mutations/stripeSubscription.ts
+init_currentRoleActor();
 
 // features/keystone/utils/paymentProviderAdapter.ts
 init_stripe_environment_provider();
@@ -9877,479 +11085,12 @@ async function getAdapterForProvider(context, providerCode, organizationId, purp
 // features/keystone/mutations/stripeSubscription.ts
 init_prisma_result();
 init_classCapacity();
-
-// features/keystone/mutations/studioLifecycle.ts
-init_membership_credits();
-init_operational_policy();
-init_operational_notices();
-init_prisma_result();
-init_classCapacity();
-function assertFacilityStaff(actor2) {
-  if (actor2.canManageAllRecords || actor2.canManageCheckIns || actor2.canManageFacilities || actor2.trustedKiosk) return;
-  throw new Error("Facility check-in management permission required");
-}
-function assertActorOrganization(actor2, organizationId) {
-  if (!organizationId || !actor2.organizationId || actor2.organizationId !== organizationId) {
-    throw new Error("Actor is not in the record organization");
-  }
-}
-function assertOwnerOrOperator(actor2, ownerUserId) {
-  if (actor2.canManageAllRecords || actor2.trustedKiosk || actor2.userId === ownerUserId) return;
-  throw new Error("You cannot manage another member's records");
-}
-async function lateCancelWindowHours(tx, organizationId) {
-  const settings = await tx.studioSettings.findFirst({ where: { organizationId }, orderBy: [{ createdAt: "asc" }], select: { lateCancelHours: true } });
-  const hours = Number(settings?.lateCancelHours ?? 0);
-  return Number.isInteger(hours) && hours > 0 ? Math.min(hours, 72) : 0;
-}
-function isLateCancellation(classStart, now, windowHours) {
-  return windowHours > 0 && classStart.getTime() - now.getTime() < windowHours * 36e5;
-}
-async function cancelCapacityControlledBooking(prisma, input) {
-  prisma = guardKeystonePrismaResults(prisma);
-  const past = input.pastBookingReason !== void 0;
-  const reason = (input.pastBookingReason ?? "").trim();
-  if (past) {
-    if (reason.length < 3 || reason.length > 1e3) throw new Error("A reason between 3 and 1000 characters is required");
-    if (!input.actor.canManageAllRecords) throw new Error("Booking management permission required");
-  }
-  const result = await prisma.$transaction(async (transaction) => {
-    await lockParticipationPolicy(transaction, input.actor.organizationId);
-    const identity = await transaction.classBooking.findFirst({
-      where: { id: input.bookingId, organizationId: input.actor.organizationId },
-      select: { classInstanceId: true, memberId: true }
-    });
-    if (!identity?.classInstanceId || !identity.memberId) throw new Error("Booking not found");
-    await lockTransactionKey(transaction, `class-instance:${identity.classInstanceId}`);
-    await lockTransactionKey(transaction, `member:${identity.memberId}`);
-    const booking = await transaction.classBooking.findFirst({
-      where: { id: input.bookingId, organizationId: input.actor.organizationId },
-      include: {
-        classInstance: { select: { id: true, date: true, organizationId: true, isCancelled: true } },
-        member: {
-          include: {
-            user: {
-              include: {
-                membership: {
-                  include: { tier: { select: { classCreditsPerMonth: true } } }
-                }
-              }
-            }
-          }
-        }
-      }
-    });
-    if (!booking?.member?.user?.id || !booking.classInstance) {
-      throw new Error("Booking owner or class instance is missing");
-    }
-    assertActorOrganization(input.actor, booking.classInstance.organizationId);
-    assertActorOrganization(input.actor, booking.member.organizationId);
-    assertOwnerOrOperator(input.actor, booking.member.user.id);
-    if (booking.status === "cancelled") {
-      return {
-        bookingId: booking.id,
-        classInstanceId: booking.classInstance.id,
-        cancelled: false,
-        releasedConfirmedSpot: false,
-        promotion: { promoted: false, message: "No confirmed spot was released" }
-      };
-    }
-    if (!["confirmed", "waitlist"].includes(booking.status)) {
-      throw new Error(`Booking cannot be cancelled from ${booking.status}`);
-    }
-    if (past) {
-      if (booking.status !== "confirmed") throw new Error("Only a confirmed booking can be cancelled after the class");
-      if (booking.classInstance.isCancelled) throw new Error("This class was cancelled; its bookings are already closed");
-      if (booking.classInstance.date.getTime() > Date.now()) throw new Error("This class hasn't started; use the normal cancel");
-      const marked = await transaction.attendanceRecord.findFirst({ where: { bookingId: booking.id, organizationId: input.actor.organizationId }, select: { id: true } });
-      if (marked) throw new Error("This booking has an attendance mark; undo the check-in first");
-    } else if (booking.classInstance.date.getTime() <= Date.now()) {
-      throw new Error("A class booking cannot be cancelled after the class starts");
-    }
-    const late = !past && booking.status === "confirmed" && !input.actor.canManageAllRecords && isLateCancellation(booking.classInstance.date, /* @__PURE__ */ new Date(), await lateCancelWindowHours(transaction, input.actor.organizationId));
-    await transaction.classBooking.update({
-      where: { id: booking.id },
-      data: {
-        status: "cancelled",
-        activeBookingKey: null,
-        cancelledAt: /* @__PURE__ */ new Date(),
-        waitlistPosition: null,
-        lateCancelled: late
-      }
-    });
-    if (booking.status === "confirmed" && !late && !isDropInBooking(booking)) await restoreBookingCredit(transaction, booking.id);
-    await enqueueOperationalNotice(transaction, {
-      organizationId: input.actor.organizationId,
-      memberId: booking.memberId,
-      key: `booking:${booking.id}:cancelled`,
-      kind: "cancellation",
-      message: late ? "Your class booking has been cancelled. It was inside the club's late-cancel window, so the class credit or drop-in fee isn't returned." : "Your class booking has been cancelled. Any restorable credit returns to its original service month.",
-      ...past ? { history: [{ action: "past_booking_cancelled", at: (/* @__PURE__ */ new Date()).toISOString(), actorId: input.actor.userId, note: reason }] } : {}
-    });
-    const waiting = await transaction.classBooking.findMany({
-      where: {
-        classInstanceId: booking.classInstance.id,
-        status: "waitlist"
-      },
-      orderBy: [{ bookedAt: "asc" }, { id: "asc" }],
-      select: { id: true }
-    });
-    await Promise.all(
-      waiting.map(
-        (entry, index) => transaction.classBooking.update({
-          where: { id: entry.id },
-          data: { waitlistPosition: index + 1 }
-        })
-      )
-    );
-    const releasedConfirmedSpot = booking.status === "confirmed";
-    const promotion = releasedConfirmedSpot && !past ? await promoteCapacityControlledWaitlistBookingInTransaction(
-      transaction,
-      booking.classInstance.id,
-      input.actor.organizationId,
-      true
-    ) : { promoted: false, message: "No confirmed spot was released" };
-    return {
-      bookingId: booking.id,
-      classInstanceId: booking.classInstance.id,
-      cancelled: true,
-      lateCancelled: late,
-      releasedConfirmedSpot,
-      promotion
-    };
-  });
-  return result;
-}
-async function cancelCapacityControlledClassInstance(prisma, input) {
-  prisma = guardKeystonePrismaResults(prisma);
-  const reason = input.reason.trim();
-  if (reason.length < 3 || reason.length > 1e3) {
-    throw new Error("Class cancellation reason must be between 3 and 1000 characters");
-  }
-  if (!input.actor.canManageAllRecords) {
-    throw new Error("Class cancellation management permission required");
-  }
-  return prisma.$transaction(async (transaction) => {
-    await lockParticipationPolicy(transaction, input.actor.organizationId);
-    await lockTransactionKey(transaction, `class-instance:${input.classInstanceId}`);
-    const loadClassInstance = () => transaction.classInstance.findFirst({
-      where: { id: input.classInstanceId, organizationId: input.actor.organizationId },
-      include: {
-        bookings: {
-          where: { status: { in: ["confirmed", "waitlist"] } },
-          include: {
-            member: {
-              include: {
-                user: {
-                  include: {
-                    membership: {
-                      include: { tier: { select: { classCreditsPerMonth: true } } }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    });
-    let classInstance = await loadClassInstance();
-    if (!classInstance) throw new Error("Class instance not found");
-    assertActorOrganization(input.actor, classInstance.organizationId);
-    if (classInstance.date.getTime() <= Date.now()) {
-      throw new Error("A class instance cannot be cancelled after it starts");
-    }
-    if (classInstance.isCancelled) {
-      return {
-        classInstanceId: classInstance.id,
-        cancelledBookings: 0,
-        refundedCredits: 0,
-        reused: true
-      };
-    }
-    const memberIds = [...new Set(
-      classInstance.bookings.map((booking) => booking.memberId).filter((id) => typeof id === "string" && id.length > 0)
-    )].sort();
-    for (const memberId of memberIds) {
-      await lockTransactionKey(transaction, `member:${memberId}`);
-    }
-    classInstance = await loadClassInstance();
-    if (!classInstance || classInstance.isCancelled) throw new Error("Class instance changed during cancellation");
-    let refundedCredits = 0;
-    for (const booking of classInstance.bookings) {
-      if (booking.status !== "confirmed" || isDropInBooking(booking)) continue;
-      if (await restoreBookingCredit(transaction, booking.id)) refundedCredits += 1;
-    }
-    for (const booking of classInstance.bookings) await enqueueOperationalNotice(transaction, {
-      organizationId: input.actor.organizationId,
-      memberId: booking.memberId,
-      key: `booking:${booking.id}:class-cancelled`,
-      kind: "cancellation",
-      message: `Your class has been cancelled: ${reason}`
-    });
-    const cancelledAt = /* @__PURE__ */ new Date();
-    await transaction.classBooking.updateMany({
-      where: {
-        classInstanceId: classInstance.id,
-        status: { in: ["confirmed", "waitlist"] }
-      },
-      data: {
-        status: "cancelled",
-        activeBookingKey: null,
-        cancelledAt,
-        waitlistPosition: null
-      }
-    });
-    await transaction.classInstance.update({
-      where: { id: classInstance.id },
-      data: { isCancelled: true, cancellationReason: reason }
-    });
-    return {
-      classInstanceId: classInstance.id,
-      cancelledBookings: classInstance.bookings.length,
-      refundedCredits,
-      reused: false
-    };
-  });
-}
-async function loadStaffAttendanceBooking(transaction, bookingId, actor2) {
-  await lockTransactionKey(transaction, `attendance:${bookingId}`);
-  const booking = await transaction.classBooking.findFirst({
-    where: { id: bookingId, organizationId: actor2.organizationId },
-    include: {
-      member: { include: { user: { include: { membership: true } } } },
-      classInstance: {
-        include: {
-          instructor: { include: { user: { select: { id: true } } } },
-          classSchedule: {
-            include: { instructor: { include: { user: { select: { id: true } } } } }
-          }
-        }
-      }
-    }
-  });
-  if (!booking?.memberId || !booking.classInstance?.classScheduleId) {
-    throw new Error("Attendance booking is missing its member or schedule");
-  }
-  assertActorOrganization(actor2, booking.member.organizationId);
-  assertActorOrganization(actor2, booking.classInstance.organizationId);
-  if (booking.status !== "confirmed") {
-    throw new Error("Attendance can only be marked for a confirmed booking");
-  }
-  if (booking.classInstance.isCancelled) throw new Error("Attendance cannot be marked for a cancelled class");
-  if (booking.classInstance.date.getTime() > Date.now()) {
-    throw new Error("Attendance cannot be marked before the class starts");
-  }
-  const effectiveInstructor2 = booking.classInstance.instructor ?? booking.classInstance.classSchedule?.instructor ?? null;
-  const assignedToActor = Boolean(effectiveInstructor2?.isActive && effectiveInstructor2?.user?.id === actor2.userId);
-  if (!actor2.canManageAllRecords && !(actor2.isInstructor && assignedToActor)) {
-    throw new Error("Attendance management permission required");
-  }
-  return booking;
-}
-async function markCapacityControlledAttendance(prisma, input) {
-  prisma = guardKeystonePrismaResults(prisma);
-  const outcome = normalizeAttendanceOutcome(input.outcome);
-  return prisma.$transaction(async (transaction) => {
-    await lockParticipationPolicy(transaction, input.actor.organizationId);
-    const booking = await loadStaffAttendanceBooking(transaction, input.bookingId, input.actor);
-    if (outcome !== "no-show") {
-      await lockTransactionKey(transaction, `member:${booking.memberId}`);
-      const currentMember = await transaction.member.findFirst({ where: { id: booking.memberId, organizationId: input.actor.organizationId }, include: { user: { include: { membership: true } } } });
-      assertInstructorQualifications(booking.classInstance.instructor ?? booking.classInstance.classSchedule?.instructor ?? {}, /* @__PURE__ */ new Date());
-      if (currentMember?.status !== "active") throw new Error("Member account is not active");
-      if (!isDropInBooking(booking)) try {
-        assertMembershipServiceEligibility(currentMember.user?.membership, booking.classInstance.date);
-      } catch (error) {
-        const debit = await transaction.membershipCreditEntry.findUnique({ where: { key: `${booking.id}:debit` }, include: { grant: true } });
-        const membership = currentMember.user?.membership;
-        if (membership?.status !== "active" || !(error instanceof Error) || error.message !== "Service is outside the paid membership period" || debit?.grant?.membershipId !== membership.id || booking.classInstance.date < debit.grant.periodStart || booking.classInstance.date >= debit.grant.periodEnd) throw error;
-      }
-      await assertParticipationAllowed(transaction, input.actor.organizationId, booking.memberId, booking.classInstance.date, booking.classInstance.locationId);
-    }
-    const requestedMinutes = Number(input.minutesLate ?? 0);
-    const minutesLate = outcome === "late" ? Math.min(Math.max(Number.isFinite(requestedMinutes) ? Math.floor(requestedMinutes) : 5, 1), 180) : null;
-    const data = {
-      organizationId: booking.member.organizationId,
-      bookingId: booking.id,
-      classScheduleId: booking.classInstance.classScheduleId,
-      memberId: booking.memberId,
-      markedById: input.actor.userId,
-      markedAt: /* @__PURE__ */ new Date(),
-      attended: outcome !== "no-show",
-      lateArrival: outcome === "late",
-      minutesLate,
-      noShowReason: outcome === "no-show" ? input.notes?.trim() || "Marked from roster" : ""
-    };
-    const existing = await transaction.attendanceRecord.findFirst({
-      where: { bookingId: booking.id, organizationId: input.actor.organizationId },
-      orderBy: { createdAt: "asc" },
-      select: { id: true }
-    });
-    const record2 = existing ? await transaction.attendanceRecord.update({ where: { id: existing.id }, data }) : await transaction.attendanceRecord.create({ data });
-    return { id: record2.id, outcome };
-  });
-}
-async function undoCapacityControlledAttendance(prisma, input) {
-  prisma = guardKeystonePrismaResults(prisma);
-  return prisma.$transaction(async (transaction) => {
-    await lockParticipationPolicy(transaction, input.actor.organizationId);
-    const booking = await loadStaffAttendanceBooking(transaction, input.bookingId, input.actor);
-    const removed = await transaction.attendanceRecord.deleteMany({
-      where: { bookingId: booking.id, organizationId: input.actor.organizationId }
-    });
-    return { bookingId: booking.id, removed: removed.count };
-  });
-}
-async function recordCapacityControlledMemberCheckIn(prisma, input) {
-  prisma = guardKeystonePrismaResults(prisma);
-  assertFacilityStaff(input.actor);
-  const method = normalizeCheckInMethod(input.method);
-  return prisma.$transaction(async (transaction) => {
-    await lockParticipationPolicy(transaction, input.actor.organizationId);
-    await lockTransactionKey(transaction, `check-in:${input.memberId}`);
-    await lockTransactionKey(transaction, `member:${input.memberId}`);
-    const member = await transaction.member.findFirst({
-      where: { id: input.memberId, organizationId: input.actor.organizationId },
-      include: {
-        user: { include: { membership: true } },
-        subscriptions: { where: { status: "active" }, select: { id: true } }
-      }
-    });
-    if (!member?.user?.id) throw new Error("Member not found");
-    assertActorOrganization(input.actor, member.organizationId);
-    if (member.status !== "active") throw new Error(`Member status is ${member.status}`);
-    if (member.user.membership?.id) await assertNoPendingMembershipFreeze(transaction, input.actor.organizationId, member.user.membership.id);
-    assertMembershipServiceEligibility(member.user.membership, /* @__PURE__ */ new Date());
-    await assertParticipationAllowed(transaction, input.actor.organizationId, member.id, /* @__PURE__ */ new Date(), input.locationId);
-    if (input.locationId) {
-      const location2 = await transaction.location.findFirst({
-        where: { id: input.locationId, organizationId: input.actor.organizationId },
-        select: { isActive: true, organizationId: true }
-      });
-      if (!location2?.isActive) throw new Error("Check-in location is not active");
-      if (location2.organizationId !== member.organizationId) throw new Error("Check-in location is not in the member's organization");
-    }
-    const existing = await transaction.checkIn.findFirst({
-      where: {
-        memberId: member.id,
-        organizationId: input.actor.organizationId,
-        isGuest: false,
-        checkOutTime: null
-      },
-      orderBy: { checkInTime: "desc" }
-    });
-    if (existing) return { checkIn: existing, reused: true };
-    if (input.actor.organizationId !== member.organizationId) throw new Error("Check-in actor organization is invalid");
-    const checkIn = await transaction.checkIn.create({
-      data: {
-        organizationId: member.organizationId,
-        memberId: member.id,
-        openCheckInKey: "open",
-        locationId: input.locationId || null,
-        method,
-        membershipValidated: true,
-        validationNotes: "Validated by controlled check-in transition"
-      }
-    });
-    return { checkIn, reused: false };
-  });
-}
-async function recordControlledGuestCheckIn(prisma, input) {
-  prisma = guardKeystonePrismaResults(prisma);
-  const guestName = input.guestName.trim();
-  const idempotencyKey = input.idempotencyKey.trim();
-  if (!guestName) throw new Error("Guest name is required");
-  if (idempotencyKey.length < 12 || idempotencyKey.length > 200) throw new Error("Guest check-in idempotency key is required");
-  const host = input.hostMemberId ? await prisma.member.findFirst({
-    where: { id: input.hostMemberId, organizationId: input.organizationId },
-    select: { organizationId: true }
-  }) : null;
-  if (input.hostMemberId && !host) throw new Error("Host member not found");
-  const organizationId = input.organizationId;
-  if (!organizationId || host && host.organizationId !== organizationId) {
-    throw new Error("Guest check-in organization is invalid");
-  }
-  return prisma.$transaction(async (transaction) => {
-    await lockParticipationPolicy(transaction, input.organizationId);
-    await assertParticipationAllowed(transaction, organizationId, null, /* @__PURE__ */ new Date());
-    await lockTransactionKey(transaction, `guest-check-in:${organizationId}:${idempotencyKey}`);
-    const marker = `[request:${idempotencyKey}]`;
-    const existing = await transaction.checkIn.findFirst({
-      where: { organizationId, isGuest: true, validationNotes: { contains: marker } },
-      orderBy: { createdAt: "asc" }
-    });
-    if (existing) return existing;
-    return transaction.checkIn.create({
-      data: {
-        organizationId,
-        memberId: input.hostMemberId || null,
-        isGuest: true,
-        guestName,
-        method: "manual",
-        membershipValidated: false,
-        validationNotes: `${marker}${input.phone?.trim() ? ` Guest phone: ${input.phone.trim()}.` : ""}${input.hostMemberId ? " Invited by member." : ""}`
-      }
-    });
-  });
-}
-async function checkOutControlledMember(prisma, input) {
-  prisma = guardKeystonePrismaResults(prisma);
-  assertFacilityStaff(input.actor);
-  return prisma.$transaction(async (transaction) => {
-    await lockParticipationPolicy(transaction, input.actor.organizationId);
-    await lockTransactionKey(transaction, `check-out:${input.checkInId}`);
-    const checkIn = await transaction.checkIn.findFirst({
-      where: { id: input.checkInId, organizationId: input.actor.organizationId },
-      include: { member: { include: { user: { select: { id: true } } } } }
-    });
-    if (!checkIn) throw new Error("Check-in not found");
-    assertActorOrganization(input.actor, checkIn.organizationId);
-    if (checkIn.checkOutTime) return { checkIn, reused: true };
-    const updated = await transaction.checkIn.update({
-      where: { id: checkIn.id },
-      data: { checkOutTime: /* @__PURE__ */ new Date(), openCheckInKey: null }
-    });
-    return { checkIn: updated, reused: false };
-  });
-}
-async function releaseFutureBookingsForEndedMembership(prisma, input) {
-  prisma = guardKeystonePrismaResults(prisma);
-  const member = await prisma.member.findFirst({
-    where: { organizationId: input.organizationId, userId: input.userId },
-    select: { id: true }
-  });
-  if (!member) return { released: 0, failed: 0 };
-  const bookings = await prisma.classBooking.findMany({
-    where: {
-      organizationId: input.organizationId,
-      memberId: member.id,
-      status: { in: ["confirmed", "waitlist"] },
-      classInstance: { date: { gt: /* @__PURE__ */ new Date() }, isCancelled: false }
-    },
-    select: { id: true },
-    orderBy: { bookedAt: "asc" }
-  });
-  const actor2 = { userId: input.actorUserId, organizationId: input.organizationId, canManageAllRecords: true };
-  let released = 0;
-  let failed = 0;
-  for (const booking of bookings) {
-    try {
-      const result = await cancelCapacityControlledBooking(prisma, { bookingId: booking.id, actor: actor2 });
-      if (result.cancelled) released += 1;
-    } catch (error) {
-      failed += 1;
-      console.error("Releasing a booking for an ended membership failed", { bookingId: booking.id, name: error instanceof Error ? error.name : "UnknownError" });
-    }
-  }
-  return { released, failed };
-}
-
-// features/keystone/mutations/stripeSubscription.ts
+init_studioLifecycle();
 init_membership_credits();
 
 // features/keystone/mutations/membershipBillingAttempts.ts
 var import_node_crypto6 = require("node:crypto");
+init_lifecycles();
 init_membership_credits();
 init_operational_notices();
 init_classCapacity();
@@ -11428,8 +12169,11 @@ async function provisionMembershipFromCheckoutSession(providerSessionId, expecte
 
 // features/keystone/mutations/paymentWebhook.ts
 init_stripe_environment_provider();
+init_lifecycles();
 init_operational_notices();
 init_membership_credits();
+init_studioLifecycle();
+init_currentRoleActor();
 init_classCapacity();
 init_prisma_result();
 
@@ -11630,9 +12374,11 @@ async function assertActiveOrganization(context, organizationId) {
 }
 
 // features/keystone/mutations/retailPolicy.ts
+init_tenantPolicy();
 init_classCapacity();
 
 // features/keystone/mutations/trainingPolicy.ts
+init_timezone();
 function trainingText(value, label, max = 2e3, required = true) {
   if (typeof value !== "string" || required && !value.trim() || value.trim().length > max) throw new Error(`${label} is invalid`);
   return value.trim();
@@ -12752,7 +13498,7 @@ async function startDropInCheckout(_root, { classInstanceId }, context) {
   if (current) throw new Error("Your membership needs attention before you can book. Review it in your account.");
   const member = await prisma.member.findFirst({ where: { organizationId, userId }, select: { id: true } });
   if (member) {
-    const duplicate = await prisma.classBooking.findFirst({ where: { organizationId, classInstanceId: id, memberId: member.id, status: { in: ["confirmed", "waitlist"] } }, select: { id: true } });
+    const duplicate = await prisma.classBooking.findFirst({ where: { organizationId, classInstanceId: id, memberId: member.id, status: { in: ["confirmed", "waitlisted"] } }, select: { id: true } });
     if (duplicate) throw new Error("You're already booked for this class");
   }
   const confirmed = await prisma.classBooking.count({ where: { organizationId, classInstanceId: id, status: "confirmed" } });
@@ -12944,6 +13690,7 @@ var import_node_crypto12 = __toESM(require("node:crypto"));
 init_prisma_result();
 init_internal_origin();
 init_clientSource();
+init_publicStudio();
 init_classCapacity();
 var GIFT_CARD_SOURCE = "openfront-pilates-gift-card";
 var GIFT_CARD_AMOUNTS = [2500, 5e3, 7500, 1e4, 15e3, 2e4];
@@ -13309,18 +14056,18 @@ async function tierForProviderPrice(transaction, subscription, organizationId) {
 async function findUserForSubscription(transaction, subscription, organizationId) {
   const customerId = typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id;
   if (!customerId) return null;
-  const select30 = { id: true, organizationId: true, stripeCustomerId: true };
+  const select31 = { id: true, organizationId: true, stripeCustomerId: true };
   if (subscription.metadata?.userId) {
     const user2 = await transaction.user.findFirst({
       where: { id: subscription.metadata.userId, organizationId },
-      select: select30
+      select: select31
     });
     if (user2?.stripeCustomerId && user2.stripeCustomerId !== customerId) throw new Error("Subscription customer does not match the existing user");
     if (user2) return { user: user2, customerId };
   }
   const user = await transaction.user.findFirst({
     where: { stripeCustomerId: customerId, organizationId },
-    select: select30
+    select: select31
   });
   return user ? { user, customerId } : null;
 }
@@ -14196,6 +14943,8 @@ async function refundPayment(root, { paymentId, amount, reason, idempotencyKey }
 }
 
 // features/keystone/mutations/studioLifecycleResolvers.ts
+init_currentRoleActor();
+init_studioLifecycle();
 async function actorFromContext(context) {
   return currentRoleActor(context);
 }
@@ -14905,6 +15654,7 @@ function parseStudioOnboardingSeed(value) {
 }
 
 // features/platform/onboarding/lib/starterBrand.ts
+init_storefront_branding();
 var STARTER_SETTINGS_BRAND = Object.freeze({
   logoIcon: DEFAULT_STUDIO_LOGO_ICON,
   logoColor: DEFAULT_LIBRARY_LOGO_COLOR
@@ -14917,9 +15667,11 @@ function adoptedSettingsLogoPatch(existing) {
 }
 
 // features/keystone/mutations/deterministicOnboarding.ts
+init_studio_hours();
 init_classCapacity();
 
 // features/keystone/lib/class-scheduling.ts
+init_trainerQualifications();
 init_classCapacity();
 init_operational_policy();
 init_membership_credits();
@@ -15009,7 +15761,7 @@ async function saveControlledOccurrence(tx, organizationId, input, id) {
   };
   if (!Number.isInteger(data.maxCapacity) || data.maxCapacity < 1 || data.maxCapacity > 1e4) throw new Error("Capacity must be a whole number from 1 to 10000");
   await assertClassAllocation(tx, organizationId, { ...data, classSchedule: schedule }, id || void 0);
-  const bookings = existing ? await tx.classBooking.findMany({ where: { organizationId, classInstanceId: existing.id, status: { in: ["confirmed", "waitlist"] } }, include: { member: { include: { user: { include: { membership: true } } } } } }) : [];
+  const bookings = existing ? await tx.classBooking.findMany({ where: { organizationId, classInstanceId: existing.id, status: { in: ["confirmed", "waitlisted"] } }, include: { member: { include: { user: { include: { membership: true } } } } } }) : [];
   if (bookings.filter((b) => b.status === "confirmed").length > data.maxCapacity) throw new Error("Capacity is below confirmed bookings");
   const changed = existing && (existing.date.getTime() !== date.getTime() || existing.instructorId !== data.instructorId || existing.locationId !== data.locationId || existing.resourceId !== data.resourceId);
   if (changed) {
@@ -15045,7 +15797,11 @@ async function saveControlledOccurrence(tx, organizationId, input, id) {
   return result;
 }
 
+// features/keystone/mutations/deterministicOnboarding.ts
+init_timezone();
+
 // features/keystone/lib/business-time-zone.ts
+init_timezone();
 async function businessTimeZone(prisma, organizationId) {
   const [settings, organization3] = await Promise.all([
     prisma.studioSettings.findFirst({ where: { organizationId }, orderBy: [{ createdAt: "asc" }], select: { timezone: true } }),
@@ -15057,6 +15813,7 @@ async function businessTimeZone(prisma, organizationId) {
 // features/keystone/mutations/deterministicOnboarding.ts
 init_current_actor();
 init_prisma_result();
+init_publicStudio();
 init_participation_terms();
 var dayNumbers = {
   sunday: 0,
@@ -15587,9 +16344,11 @@ async function inviteMember(_root, { data }, context) {
 }
 
 // features/keystone/mutations/memberAccount.ts
+init_currentRoleActor();
 init_classCapacity();
 init_operational_notices();
 init_prisma_result();
+init_lifecycles();
 async function setMemberAccountStatus(_root, { memberId, status }, context) {
   const actor2 = await currentRoleActor(context);
   const organizationId = actor2.organizationId;
@@ -15639,7 +16398,7 @@ async function setMemberAccountStatus(_root, { memberId, status }, context) {
     await transaction.classBooking.updateMany({ where: {
       organizationId,
       memberId,
-      status: { in: ["confirmed", "waitlist"] },
+      status: { in: ["confirmed", "waitlisted"] },
       classInstance: { date: { gt: /* @__PURE__ */ new Date() } },
       ...status === "active" ? { eligibilityReviewReason: "Member account is suspended" } : {}
     }, data: { eligibilityReviewReason: status === "active" ? "" : "Member account is suspended" } });
@@ -15684,6 +16443,7 @@ async function transitionOnboardingStatus(_root, { status }, context) {
 }
 
 // features/keystone/mutations/scheduling.ts
+init_currentRoleActor();
 init_prisma_result();
 init_membership_credits();
 init_operational_policy();
@@ -15718,6 +16478,7 @@ async function deleteClassScheduleInTransaction(tx, organizationId, scheduleId, 
 }
 
 // features/keystone/mutations/scheduling.ts
+init_timezone();
 init_classCapacity();
 var DAY_MAP = {
   sunday: 0,
@@ -15820,10 +16581,10 @@ async function saveStudioClassSchedule(_root, { id, data }, context) {
     if (id && !existing) throw new Error("Schedule not found");
     const next = { organizationId };
     for (const key of ["name", "description", "dayOfWeek", "startTime", "endTime", "maxCapacity", "isActive"]) if (data[key] !== void 0) next[key] = data[key];
-    for (const [field, list42] of [["instructor", "instructor"], ["classType", "classType"], ["location", "location"], ["resource", "room"]]) {
+    for (const [field, list43] of [["instructor", "instructor"], ["classType", "classType"], ["location", "location"], ["resource", "room"]]) {
       if (data[field] === void 0) continue;
       const relatedId = data[field]?.disconnect ? null : data[field]?.connect?.id;
-      if (relatedId !== null && (typeof relatedId !== "string" || !await tx[list42].findFirst({ where: { id: relatedId, organizationId } }))) throw new Error(`${field} is not in this organization`);
+      if (relatedId !== null && (typeof relatedId !== "string" || !await tx[list43].findFirst({ where: { id: relatedId, organizationId } }))) throw new Error(`${field} is not in this organization`);
       next[`${field}Id`] = relatedId;
     }
     const merged = { ...existing, ...next };
@@ -15986,6 +16747,7 @@ function isKioskTokenValid(suppliedToken) {
 
 // features/keystone/mutations/kiosk.ts
 init_clientSource();
+init_studioLifecycle();
 function kioskTenant(credential, organizationId) {
   if (!isKioskTokenValid(credential)) throw new Error("Kiosk operation authorization failed");
   const configuredOrganizationId = getKioskOrganizationId();
@@ -16256,7 +17018,7 @@ async function getDiscoveryClassFeed(context, options) {
   });
   return instances.map((instance) => {
     const confirmedBookings = (instance.bookings ?? []).filter((booking) => booking.status === "confirmed").length;
-    const waitlistCount = (instance.bookings ?? []).filter((booking) => booking.status === "waitlist").length;
+    const waitlistCount = (instance.bookings ?? []).filter((booking) => booking.status === "waitlisted").length;
     const maxCapacity = instance.maxCapacity ?? instance.classSchedule?.maxCapacity ?? 0;
     const spotsRemaining = Math.max(maxCapacity - confirmedBookings, 0);
     const site = instance.location ?? instance.classSchedule?.location ?? null;
@@ -16352,7 +17114,7 @@ async function createDiscoveryBooking(context, input) {
         { organization: { id: { equals: input.organizationId } } },
         { member: { id: { equals: member.id } } },
         { classInstance: { id: { equals: input.classInstanceId } } },
-        { status: { in: ["confirmed", "waitlist"] } }
+        { status: { in: ["confirmed", "waitlisted"] } }
       ]
     },
     take: 1,
@@ -16485,6 +17247,7 @@ async function getDiscoveryClassCalendar(_root, args, context) {
 // features/keystone/mutations/contact.ts
 init_mail();
 init_clientSource();
+init_publicStudio();
 var referencePattern = /^STUDIO-\d{8}-[A-F0-9]{8}$/;
 function sourcePathOf(value) {
   const path = value?.trim() || "";
@@ -16959,9 +17722,11 @@ init_operational_policy();
 init_classCapacity();
 
 // features/keystone/mutations/appointment.ts
+init_trainerQualifications();
 init_operational_policy();
 init_operational_notices();
 init_prisma_result();
+init_tenantPolicy();
 init_classCapacity();
 init_current_actor();
 
@@ -17707,7 +18472,11 @@ async function closeRetail(_r, { data }, context) {
   return closeRetailAtomic(context.prisma, data, retailActorFromContext(context));
 }
 
+// features/keystone/mutations/index.ts
+init_rooms();
+
 // features/keystone/mutations/coachProfiles.ts
+init_currentRoleActor();
 init_prisma_result();
 var PAGE = 25;
 async function eligibleCoachAccounts(_root, { q, skip = 0 }, context) {
@@ -17924,7 +18693,7 @@ function extendGraphqlSchema(baseSchema) {
         saveStudioClassInstance(id: ID, data: JSON!): ClassInstance
         replayPaymentEvent(eventId: ID!): JSON!
         runOperationsCommand(command: String!, data: JSON!): JSON!
-        bookClass(classInstanceId: ID!, memberId: ID!): BookClassResult!
+        bookClass(classInstanceId: ID!, spotId: ID, memberId: ID, idempotencyKey: String): BookClassResult!
         promoteFromWaitlist(classInstanceId: ID!): PromoteResult!
         cancelClassBooking(bookingId: ID!): BookingCancellationResult!
         cancelClassInstance(classInstanceId: ID!, reason: String!): ClassInstanceCancellationResult!
@@ -18014,6 +18783,10 @@ function extendGraphqlSchema(baseSchema) {
       }
 
       type BookClassResult {
+        bookingId: ID!
+        status: String!
+        spot: BookedSpot
+        waitlistPosition: Int
         booking: ClassBooking
         creditsRemaining: Int!
       }
@@ -18203,12 +18976,14 @@ function extendGraphqlSchema(baseSchema) {
         activeMemberships: Int!
         pastDueCount: Int!
       }
-    `, trainingWorkspaceTypeDefs, retailTypeDefs, counterPaymentTypeDefs, dropInTypeDefs, giftCardTypeDefs, staffIntentTypeDefs, coachProfileTypeDefs],
+    `, trainingWorkspaceTypeDefs, retailTypeDefs, counterPaymentTypeDefs, dropInTypeDefs, roomTypeDefs, giftCardTypeDefs, staffIntentTypeDefs, coachProfileTypeDefs],
     resolvers: {
       Query: {
         retailWorkspace,
         retailSaleItems,
         studioSettingsEditor,
+        classAvailability,
+        roomsWorkspace,
         trainingWorkspace: getTrainingWorkspace,
         operationsWorkspace,
         participationWorkspace,
@@ -18281,6 +19056,12 @@ function extendGraphqlSchema(baseSchema) {
         replayPaymentEvent,
         runOperationsCommand,
         bookClass,
+        joinWaitlist,
+        leaveWaitlist,
+        changeBookingSpot,
+        saveRoomLayout,
+        setSpotOutOfService,
+        promoteWaitlistBooking,
         promoteFromWaitlist,
         cancelClassBooking,
         cancelClassInstance,
@@ -18326,6 +19107,7 @@ function extendGraphqlSchema(baseSchema) {
 
 // features/keystone/index.ts
 init_mail();
+init_access();
 
 // features/keystone/security/graphql-limits.ts
 var import_graphql4 = require("graphql");
@@ -18562,7 +19344,7 @@ var { withAuth } = (0, import_auth2.createAuth)({
   `
 });
 var keystone_default = withAuth(
-  (0, import_core41.config)({
+  (0, import_core42.config)({
     db: {
       provider: "postgresql",
       url: pooledDatabaseUrl(databaseURL),

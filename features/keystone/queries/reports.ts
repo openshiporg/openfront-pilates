@@ -113,7 +113,7 @@ export async function getReportsDashboard(_root: unknown, _args: unknown, contex
   const settledPayments = completedPaymentAggregate._count._all;
   const utilization = (upcomingInstances as any[]).map((instance) => {
     const confirmedBookings = (instance.bookings || []).filter((booking: any) => booking.status === "confirmed").length;
-    const waitlistCount = (instance.bookings || []).filter((booking: any) => booking.status === "waitlist").length;
+    const waitlistCount = (instance.bookings || []).filter((booking: any) => booking.status === "waitlisted").length;
     const maxCapacity = instance.maxCapacity ?? instance.classSchedule?.maxCapacity ?? 0;
     return {
       id: instance.id,

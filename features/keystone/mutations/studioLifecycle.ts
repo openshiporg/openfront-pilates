@@ -1,3 +1,4 @@
+import { appendHistory, historyEntry } from "../lib/spots";
 import { assertInstructorQualifications } from "./trainerQualifications";
 import { assertNoPendingMembershipFreeze, restoreBookingCredit, assertMembershipServiceEligibility } from "../lib/membership-credits";
 import { assertParticipationAllowed, lockParticipationPolicy } from "../lib/operational-policy";
@@ -99,7 +100,7 @@ export async function cancelCapacityControlledBooking(
     assertActorOrganization(input.actor, booking.member.organizationId);
     assertOwnerOrOperator(input.actor, booking.member.user.id);
 
-    if (booking.status === "cancelled") {
+    if (booking.status === "cancelled" || booking.status === "late_cancelled") {
       return {
         bookingId: booking.id,
         classInstanceId: booking.classInstance.id,
@@ -108,7 +109,7 @@ export async function cancelCapacityControlledBooking(
         promotion: { promoted: false, message: "No confirmed spot was released" },
       };
     }
-    if (!['confirmed', 'waitlist'].includes(booking.status)) {
+    if (!["confirmed", "waitlisted"].includes(booking.status)) {
       throw new Error(`Booking cannot be cancelled from ${booking.status}`);
     }
     if (past) {
@@ -128,11 +129,13 @@ export async function cancelCapacityControlledBooking(
     await transaction.classBooking.update({
       where: { id: booking.id },
       data: {
-        status: "cancelled",
+        status: late ? "late_cancelled" : "cancelled",
         activeBookingKey: null,
+        activeSpotKey: null,
         cancelledAt: new Date(),
         waitlistPosition: null,
         lateCancelled: late,
+        history: appendHistory(booking.history, historyEntry(booking.status === "waitlisted" ? "left" : late ? "late_cancelled" : "cancelled", { by: input.actor.userId })),
       },
     });
 
@@ -143,23 +146,6 @@ export async function cancelCapacityControlledBooking(
         : "Your class booking has been cancelled. Any restorable credit returns to its original service month.",
       ...(past ? { history: [{ action: "past_booking_cancelled", at: new Date().toISOString(), actorId: input.actor.userId, note: reason }] } : {}) });
 
-    const waiting = await transaction.classBooking.findMany({
-      where: {
-        classInstanceId: booking.classInstance.id,
-        status: "waitlist",
-      },
-      orderBy: [{ bookedAt: "asc" }, { id: "asc" }],
-      select: { id: true },
-    });
-    await Promise.all(
-      waiting.map((entry: { id: string }, index: number) =>
-        transaction.classBooking.update({
-          where: { id: entry.id },
-          data: { waitlistPosition: index + 1 },
-        })
-      )
-    );
-
     const releasedConfirmedSpot = booking.status === "confirmed";
     // A class that already started never promotes from its waitlist.
     const promotion = releasedConfirmedSpot && !past
@@ -168,6 +154,7 @@ export async function cancelCapacityControlledBooking(
           booking.classInstance.id,
           input.actor.organizationId!,
           true,
+          { preferredSpotId: booking.spotId ?? null },
         )
       : { promoted: false, message: "No confirmed spot was released" };
 
@@ -208,7 +195,7 @@ export async function cancelCapacityControlledClassInstance(
       where: { id: input.classInstanceId, organizationId: input.actor.organizationId },
       include: {
         bookings: {
-          where: { status: { in: ["confirmed", "waitlist"] } },
+          where: { status: { in: ["confirmed", "waitlisted"] } },
           include: {
             member: {
               include: {
@@ -265,11 +252,12 @@ export async function cancelCapacityControlledClassInstance(
     await transaction.classBooking.updateMany({
       where: {
         classInstanceId: classInstance.id,
-        status: { in: ["confirmed", "waitlist"] },
+        status: { in: ["confirmed", "waitlisted"] },
       },
       data: {
         status: "cancelled",
         activeBookingKey: null,
+        activeSpotKey: null,
         cancelledAt,
         waitlistPosition: null,
       },
@@ -574,7 +562,7 @@ export async function releaseFutureBookingsForEndedMembership(
     where: {
       organizationId: input.organizationId,
       memberId: member.id,
-      status: { in: ["confirmed", "waitlist"] },
+      status: { in: ["confirmed", "waitlisted"] },
       classInstance: { date: { gt: new Date() }, isCancelled: false },
     },
     select: { id: true },

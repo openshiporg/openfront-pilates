@@ -1,6 +1,6 @@
 import { list } from "@keystone-6/core";
 import { denyAll } from "@keystone-6/core/access";
-import { text, integer, decimal, json, relationship } from "@keystone-6/core/fields";
+import { text, integer, decimal, json, relationship, checkbox } from "@keystone-6/core/fields";
 
 import { isSignedIn } from "../access";
 import { tenantFilter } from "../access/tenantPolicy";
@@ -141,6 +141,15 @@ export const StudioSettings = list({
 
     // Members who cancel a confirmed class this close to the start forfeit its credit (Mindbody late-cancel window).
     // A late-cancelled paid drop-in is not refunded. Staff cancellations are always treated as waived. 0 turns it off.
+    privateCancelWindowHours: integer({ defaultValue: 24, validation: { isRequired: true, min: 0, max: 168 }, ui: { description: "Free-cancel window for privates, duets and trios (hours)" } }),
+    lateCancelFee: integer({ defaultValue: 1500, validation: { isRequired: true, min: 0, max: 100000 }, ui: { description: "Late-cancel fee for unlimited members (cents)" } }),
+    noShowFee: integer({ defaultValue: 2000, validation: { isRequired: true, min: 0, max: 100000 }, ui: { description: "No-show fee for unlimited members (cents)" } }),
+    lateCancelWaiversPer30Days: integer({ defaultValue: 1, validation: { isRequired: true, min: 0, max: 10 }, ui: { description: "Late cancels an unlimited member may make in 30 days before a fee applies" } }),
+    waitlistCutoffMinutes: integer({ defaultValue: 120, validation: { isRequired: true, min: 0, max: 1440 }, ui: { description: "No waitlist promotion inside this many minutes before class; the freed machine is open to book" } }),
+    bookingHorizonDays: integer({ defaultValue: 14, validation: { isRequired: true, min: 1, max: 90 }, ui: { description: "How many days ahead a client without a membership can book" } }),
+    requireWaiver: checkbox({ defaultValue: true }),
+    gripSocksRequired: checkbox({ defaultValue: true }),
+    arriveEarlyMinutes: integer({ defaultValue: 10, validation: { isRequired: true, min: 0, max: 60 } }),
     lateCancelHours: integer({
       defaultValue: 12,
       validation: { isRequired: true, min: 0, max: 72 },
