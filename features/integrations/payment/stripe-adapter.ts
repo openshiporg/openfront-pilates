@@ -181,6 +181,33 @@ export const stripePaymentProviderAdapter: PaymentProviderAdapter = {
     }
   },
 
+  async chargeSavedPaymentMethod(input) {
+    const stripe = getStripeChargeClient();
+    let paymentMethod = input.paymentMethodId || null;
+    if (!paymentMethod) {
+      const customer: any = await stripe.customers.retrieve(input.customerId);
+      paymentMethod = customer?.invoice_settings?.default_payment_method || null;
+      if (!paymentMethod) {
+        const listed = await stripe.paymentMethods.list({ customer: input.customerId, type: "card", limit: 1 });
+        paymentMethod = listed.data[0]?.id || null;
+      }
+    }
+    if (!paymentMethod) return { status: "failed", paymentIntentId: null, failureMessage: "No saved card" };
+    try {
+      const intent = await stripe.paymentIntents.create({
+        amount: input.amount, currency: input.currencyCode.toLowerCase(), customer: input.customerId, payment_method: paymentMethod,
+        off_session: true, confirm: true, description: input.description, metadata: input.metadata,
+      }, { idempotencyKey: input.idempotencyKey });
+      return { status: intent.status === "succeeded" ? "succeeded" : intent.status === "processing" ? "pending" : "failed", paymentIntentId: intent.id, failureMessage: intent.last_payment_error?.message ?? null };
+    } catch (error: any) {
+      // A card decline (or authentication required) is an outcome, not an error: the fee stays owed.
+      if (error?.type === "StripeCardError" || error?.code === "authentication_required" || error?.code === "card_declined") {
+        return { status: "failed", paymentIntentId: error?.payment_intent?.id ?? error?.raw?.payment_intent?.id ?? null, failureMessage: error?.message ?? "Card declined" };
+      }
+      throw error;
+    }
+  },
+
   async createSetupIntent(customerId) {
     const intent = await getStripeChargeClient().setupIntents.create({
       customer: customerId,

@@ -28,8 +28,10 @@ test("the late-cancel window is whole hours from 0 to 72", () => {
 
 test("only a member's own cancel is late; it keeps the credit spent and the drop-in fee, and staff cancels stay waived", () => {
   const lifecycle = readFileSync("features/keystone/mutations/studioLifecycle.ts", "utf8");
-  assert.match(lifecycle, /const late = !past && booking\.status === "confirmed" && !input\.actor\.canManageAllRecords/);
+  assert.match(lifecycle, /quoteBookingCancellation\(transaction, booking, new Date\(\), input\.actor\.canManageAllRecords && !input\.applyPolicy\)/);
   assert.match(lifecycle, /booking\.status === "confirmed" && !late && !isDropInBooking\(booking\)\) await restoreBookingCredit/);
+  const fees = readFileSync("features/keystone/lib/fees.ts", "utf8");
+  assert.match(fees, /const late = !actorIsStaff && policy\.windowHours > 0/);
   const resolvers = readFileSync("features/keystone/mutations/studioLifecycleResolvers.ts", "utf8");
   assert.match(resolvers, /if \(result\.cancelled && !late\) await refundCancelledDropIns/);
   const dropIn = readFileSync("features/keystone/mutations/dropIn.ts", "utf8");

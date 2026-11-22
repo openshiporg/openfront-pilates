@@ -155,6 +155,7 @@ export const ClassBooking = list({
       ui: { description: "The member cancelled inside the club's late-cancel window; the class credit was not returned" },
     }),
 
+    checkedInAt: timestamp({ access: { create: denyAll, update: denyAll } }),
     cancelledAt: timestamp({
       access: { update: denyAll },
       ui: {

@@ -124,7 +124,7 @@ export const Role = list({
     canManagePrograms: checkbox({ defaultValue: false, label: 'User can assign and review teaching work for any member' }),
     canManageCommunications: checkbox({ defaultValue: false, label: 'User can read and answer storefront contact messages' }),
     canManageRetail: checkbox({ defaultValue: false, label: 'User can record retail sales, returns, stock and cash drawer closes' }),
-    canManagePayroll: checkbox({ defaultValue: false, label: 'Reserved: Studio has no payroll features; grants no access', ui: { createView: { fieldMode: 'hidden' }, itemView: { fieldMode: 'hidden' }, listView: { fieldMode: 'hidden' } } }),
+    canManagePayroll: checkbox({ defaultValue: false, label: 'Manage instructor pay rates, pay lines and payroll runs' }),
     canViewReports: checkbox({ defaultValue: false, label: 'User can view reports' }),
     isInstructor: checkbox({ defaultValue: false, label: 'User is a instructor: sees their own rosters, appointments and teaching members' }),
     assignedTo: relationship({

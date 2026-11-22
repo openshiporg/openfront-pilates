@@ -85,6 +85,8 @@ import { importMemberContacts } from './portableData';
 import { retailTypeDefs, retailWorkspace, retailSaleItems, saveRetailItem, quoteRetailSale, sellRetail, returnRetail, closeRetail } from './retailLifecycle';
 import { counterPaymentTypeDefs, reconcileCounterPayment } from './counterPayments';
 import { completeDropInCheckout, dropInTypeDefs, startDropInCheckout } from './dropIn';
+import { payrollTypeDefs, payrollWorkspace, exportPayrollRun, savePayRate, addPayLine, openPayrollRun, lockPayrollRun, markPayrollPaid } from './payroll';
+import { feeTypeDefs, quoteCancellation, payFee, waiveFee, refundFee, closeClass, reopenClass } from './fees';
 import { packTypeDefs, startPackCheckout, completePackCheckout, myCredits, adjustCredits } from './packs';
 import { roomTypeDefs, classAvailability, roomsWorkspace, joinWaitlist, leaveWaitlist, changeBookingSpot, saveRoomLayout, setSpotOutOfService, promoteWaitlistBooking } from './rooms';
 import { confirmGiftCardOrder, giftCardOptions, giftCardTypeDefs, giftCardsWorkspace, lookupGiftCard, redeemGiftCard, refundGiftCard, startGiftCardCheckout } from './giftCards';
@@ -554,7 +556,7 @@ export function extendGraphqlSchema(baseSchema: GraphQLSchema) {
         activeMemberships: Int!
         pastDueCount: Int!
       }
-    `, trainingWorkspaceTypeDefs, retailTypeDefs, counterPaymentTypeDefs, dropInTypeDefs, roomTypeDefs, packTypeDefs, giftCardTypeDefs, staffIntentTypeDefs, coachProfileTypeDefs],
+    `, trainingWorkspaceTypeDefs, retailTypeDefs, counterPaymentTypeDefs, dropInTypeDefs, roomTypeDefs, packTypeDefs, feeTypeDefs, payrollTypeDefs, giftCardTypeDefs, staffIntentTypeDefs, coachProfileTypeDefs],
     resolvers: {
       Query: {
         retailWorkspace,
@@ -562,6 +564,9 @@ export function extendGraphqlSchema(baseSchema: GraphQLSchema) {
         studioSettingsEditor,
         classAvailability,
         myCredits,
+        quoteCancellation,
+        payrollWorkspace,
+        exportPayrollRun,
         roomsWorkspace,
         trainingWorkspace: getTrainingWorkspace,
         operationsWorkspace,
@@ -621,6 +626,16 @@ export function extendGraphqlSchema(baseSchema: GraphQLSchema) {
         startPackCheckout,
         completePackCheckout,
         adjustCredits,
+        payFee,
+        waiveFee,
+        refundFee,
+        closeClass,
+        reopenClass,
+        savePayRate,
+        addPayLine,
+        openPayrollRun,
+        lockPayrollRun,
+        markPayrollPaid,
         leaveWaitlist,
         changeBookingSpot,
         saveRoomLayout,

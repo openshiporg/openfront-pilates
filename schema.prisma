@@ -93,6 +93,7 @@ model CreditGrant {
   @@index([classPackId])
   @@index([membershipId])
   @@index([paymentId])
+  @@index([organizationId, memberId, kind, status, expiresAt], map: "CreditGrant_spend_idx")
 }
 
 model CreditEntry {
@@ -124,6 +125,128 @@ model CreditEntry {
   @@index([bookingId])
   @@index([appointmentId])
   @@index([actorId])
+}
+
+model Fee {
+  id                      String        @id @default(cuid())
+  organization            Organization  @relation("Fee_organization", fields: [organizationId], references: [id])
+  organizationId          String        @map("organization")
+  member                  Member        @relation("Fee_member", fields: [memberId], references: [id])
+  memberId                String        @map("member")
+  booking                 ClassBooking? @relation("Fee_booking", fields: [bookingId], references: [id])
+  bookingId               String?       @map("booking")
+  appointment             Appointment?  @relation("Fee_appointment", fields: [appointmentId], references: [id])
+  appointmentId           String?       @map("appointment")
+  feeKey                  String        @default("")
+  kind                    String
+  amount                  Int
+  currencyCode            String        @default("USD")
+  status                  String        @default("assessed")
+  payment                 Payment?      @relation("Fee_payment", fields: [paymentId], references: [id])
+  paymentId               String?       @map("payment")
+  providerPaymentIntentId String        @default("")
+  failureMessage          String        @default("")
+  waivedBy                User?         @relation("Fee_waivedBy", fields: [waivedById], references: [id])
+  waivedById              String?       @map("waivedBy")
+  waivedReason            String        @default("")
+  waivedBasis             String        @default("")
+  refundedAt              DateTime?
+  history                 Json?         @default("[]")
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @default(now()) @updatedAt
+
+  @@unique([organizationId, feeKey])
+  @@index([organizationId])
+  @@index([memberId])
+  @@index([bookingId])
+  @@index([appointmentId])
+  @@index([paymentId])
+  @@index([waivedById])
+}
+
+model PayRate {
+  id                   String       @id @default(cuid())
+  organization         Organization @relation("PayRate_organization", fields: [organizationId], references: [id])
+  organizationId       String       @map("organization")
+  instructor           Instructor   @relation("PayRate_instructor", fields: [instructorId], references: [id])
+  instructorId         String       @map("instructor")
+  classBase            Int          @default(0)
+  perHeadBonus         Int          @default(0)
+  bonusAbove           Int          @default(0)
+  floor                Int          @default(0)
+  privateAmount        Int          @default(0)
+  duetAmount           Int          @default(0)
+  trioAmount           Int          @default(0)
+  hourlyAmount         Int          @default(0)
+  currencyCode         String       @default("USD")
+  effectiveFrom        DateTime
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @default(now()) @updatedAt
+  from_PayLine_payRate PayLine[]    @relation("PayLine_payRate")
+
+  @@index([organizationId])
+  @@index([instructorId])
+}
+
+model PayLine {
+  id              String         @id @default(cuid())
+  organization    Organization   @relation("PayLine_organization", fields: [organizationId], references: [id])
+  organizationId  String         @map("organization")
+  instructor      Instructor     @relation("PayLine_instructor", fields: [instructorId], references: [id])
+  instructorId    String         @map("instructor")
+  lineKey         String         @default("")
+  kind            String
+  classInstance   ClassInstance? @relation("PayLine_classInstance", fields: [classInstanceId], references: [id])
+  classInstanceId String?        @map("classInstance")
+  appointment     Appointment?   @relation("PayLine_appointment", fields: [appointmentId], references: [id])
+  appointmentId   String?        @map("appointment")
+  workDate        DateTime
+  headcount       Int?           @default(0)
+  hours           Int?           @default(0)
+  amount          Int
+  currencyCode    String         @default("USD")
+  rule            String         @default("")
+  note            String         @default("")
+  status          String         @default("accrued")
+  run             PayrollRun?    @relation("PayLine_run", fields: [runId], references: [id])
+  runId           String?        @map("run")
+  payRate         PayRate?       @relation("PayLine_payRate", fields: [payRateId], references: [id])
+  payRateId       String?        @map("payRate")
+  createdBy       User?          @relation("PayLine_createdBy", fields: [createdById], references: [id])
+  createdById     String?        @map("createdBy")
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @default(now()) @updatedAt
+
+  @@unique([organizationId, lineKey])
+  @@index([organizationId])
+  @@index([instructorId])
+  @@index([classInstanceId])
+  @@index([appointmentId])
+  @@index([runId])
+  @@index([payRateId])
+  @@index([createdById])
+}
+
+model PayrollRun {
+  id             String       @id @default(cuid())
+  organization   Organization @relation("PayrollRun_organization", fields: [organizationId], references: [id])
+  organizationId String       @map("organization")
+  periodStart    DateTime
+  periodEnd      DateTime
+  status         String       @default("draft")
+  total          Int?         @default(0)
+  currencyCode   String       @default("USD")
+  payouts        Json?        @default("[]")
+  lines          PayLine[]    @relation("PayLine_run")
+  lockedAt       DateTime?
+  lockedBy       User?        @relation("PayrollRun_lockedBy", fields: [lockedById], references: [id])
+  lockedById     String?      @map("lockedBy")
+  paidAt         DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @default(now()) @updatedAt
+
+  @@index([organizationId])
+  @@index([lockedById])
 }
 
 model RetailItem {
@@ -590,6 +713,10 @@ model Organization {
   from_ClassPack_organization             ClassPack[]                @relation("ClassPack_organization")
   from_CreditGrant_organization           CreditGrant[]              @relation("CreditGrant_organization")
   from_CreditEntry_organization           CreditEntry[]              @relation("CreditEntry_organization")
+  from_Fee_organization                   Fee[]                      @relation("Fee_organization")
+  from_PayRate_organization               PayRate[]                  @relation("PayRate_organization")
+  from_PayLine_organization               PayLine[]                  @relation("PayLine_organization")
+  from_PayrollRun_organization            PayrollRun[]               @relation("PayrollRun_organization")
   from_RetailItem_organization            RetailItem[]               @relation("RetailItem_organization")
   from_RetailSale_organization            RetailSale[]               @relation("RetailSale_organization")
   from_RetailReturn_organization          RetailReturn[]             @relation("RetailReturn_organization")
@@ -634,6 +761,9 @@ model User {
   passwordResetIssuedAt                 DateTime?
   passwordResetRedeemedAt               DateTime?
   from_CreditEntry_actor                CreditEntry[]           @relation("CreditEntry_actor")
+  from_Fee_waivedBy                     Fee[]                   @relation("Fee_waivedBy")
+  from_PayLine_createdBy                PayLine[]               @relation("PayLine_createdBy")
+  from_PayrollRun_lockedBy              PayrollRun[]            @relation("PayrollRun_lockedBy")
   from_RetailSale_recordedBy            RetailSale[]            @relation("RetailSale_recordedBy")
   from_RetailReturn_recordedBy          RetailReturn[]          @relation("RetailReturn_recordedBy")
   from_RetailStockEntry_recordedBy      RetailStockEntry[]      @relation("RetailStockEntry_recordedBy")
@@ -644,8 +774,10 @@ model User {
   from_TrainingCreditEntry_actor        TrainingCreditEntry[]   @relation("TrainingCreditEntry_actor")
   from_Member_user                      Member[]                @relation("Member_user")
   from_MembershipPayment_processedBy    MembershipPayment[]     @relation("MembershipPayment_processedBy")
+  from_Payment_recordedBy               Payment[]               @relation("Payment_recordedBy")
   from_AttendanceRecord_markedBy        AttendanceRecord[]      @relation("AttendanceRecord_markedBy")
   from_Instructor_user                  Instructor[]            @relation("Instructor_user")
+  from_ClassInstance_closedBy           ClassInstance[]         @relation("ClassInstance_closedBy")
 
   @@index([organizationId])
   @@index([roleId])
@@ -714,6 +846,7 @@ model Member {
   updatedAt                         DateTime                @default(now()) @updatedAt
   from_CreditGrant_member           CreditGrant[]           @relation("CreditGrant_member")
   from_CreditEntry_member           CreditEntry[]           @relation("CreditEntry_member")
+  from_Fee_member                   Fee[]                   @relation("Fee_member")
   from_MemberImportRecord_member    MemberImportRecord[]    @relation("MemberImportRecord_member")
   from_TrainingPackage_member       TrainingPackage[]       @relation("TrainingPackage_member")
   from_OperationalNotice_member     OperationalNotice[]     @relation("OperationalNotice_member")
@@ -890,6 +1023,10 @@ model Payment {
   amount                   Int
   currencyCode             String           @default("USD")
   status                   String           @default("pending")
+  purpose                  String?
+  method                   String?          @default("stripe")
+  recordedBy               User?            @relation("Payment_recordedBy", fields: [recordedById], references: [id])
+  recordedById             String?          @map("recordedBy")
   paymentDate              DateTime         @default(now())
   metadata                 Json?            @default("{}")
   stripePaymentIntentId    String?
@@ -906,6 +1043,7 @@ model Payment {
   createdAt                DateTime         @default(now())
   updatedAt                DateTime         @default(now()) @updatedAt
   from_CreditGrant_payment CreditGrant[]    @relation("CreditGrant_payment")
+  from_Fee_payment         Fee[]            @relation("Fee_payment")
   from_Appointment_payment Appointment[]    @relation("Appointment_payment")
 
   @@index([organizationId])
@@ -913,6 +1051,7 @@ model Payment {
   @@index([subscriptionId])
   @@index([paymentProviderId])
   @@index([paymentSessionId])
+  @@index([recordedById])
   @@index([receiptNumber])
 }
 
@@ -1239,10 +1378,12 @@ model ClassBooking {
   waitlistPosition              Int?
   bookedAt                      DateTime           @default(now())
   lateCancelled                 Boolean            @default(false)
+  checkedInAt                   DateTime?
   cancelledAt                   DateTime?
   createdAt                     DateTime           @default(now())
   updatedAt                     DateTime           @default(now()) @updatedAt
   from_CreditEntry_booking      CreditEntry[]      @relation("CreditEntry_booking")
+  from_Fee_booking              Fee[]              @relation("Fee_booking")
   from_AttendanceRecord_booking AttendanceRecord[] @relation("AttendanceRecord_booking")
 
   @@unique([organizationId, classInstanceId, memberId, activeBookingKey])
@@ -1254,22 +1395,24 @@ model ClassBooking {
 }
 
 model Instructor {
-  id             String                   @id @default(cuid())
-  organization   Organization             @relation("Instructor_organization", fields: [organizationId], references: [id])
-  organizationId String                   @map("organization")
-  user           User?                    @relation("Instructor_user", fields: [userId], references: [id])
-  userId         String?                  @map("user")
-  bio            Json                     @default("[{\"type\":\"paragraph\",\"children\":[{\"text\":\"\"}]}]")
-  specialties    Json?                    @default("[]")
-  certifications Json?                    @default("[]")
-  photo          String                   @default("")
-  isActive       Boolean                  @default(true)
-  classSchedules ClassSchedule[]          @relation("ClassSchedule_instructor")
-  classInstances ClassInstance[]          @relation("ClassInstance_instructor")
-  availability   InstructorAvailability[] @relation("InstructorAvailability_instructor")
-  appointments   Appointment[]            @relation("Appointment_instructor")
-  createdAt      DateTime                 @default(now())
-  updatedAt      DateTime                 @default(now()) @updatedAt
+  id                      String                   @id @default(cuid())
+  organization            Organization             @relation("Instructor_organization", fields: [organizationId], references: [id])
+  organizationId          String                   @map("organization")
+  user                    User?                    @relation("Instructor_user", fields: [userId], references: [id])
+  userId                  String?                  @map("user")
+  bio                     Json                     @default("[{\"type\":\"paragraph\",\"children\":[{\"text\":\"\"}]}]")
+  specialties             Json?                    @default("[]")
+  certifications          Json?                    @default("[]")
+  photo                   String                   @default("")
+  isActive                Boolean                  @default(true)
+  classSchedules          ClassSchedule[]          @relation("ClassSchedule_instructor")
+  classInstances          ClassInstance[]          @relation("ClassInstance_instructor")
+  availability            InstructorAvailability[] @relation("InstructorAvailability_instructor")
+  appointments            Appointment[]            @relation("Appointment_instructor")
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @default(now()) @updatedAt
+  from_PayRate_instructor PayRate[]                @relation("PayRate_instructor")
+  from_PayLine_instructor PayLine[]                @relation("PayLine_instructor")
 
   @@unique([organizationId, userId])
   @@index([organizationId])
@@ -1277,27 +1420,31 @@ model Instructor {
 }
 
 model ClassInstance {
-  id                 String         @id @default(cuid())
-  organization       Organization   @relation("ClassInstance_organization", fields: [organizationId], references: [id])
-  organizationId     String         @map("organization")
-  location           Location?      @relation("ClassInstance_location", fields: [locationId], references: [id])
-  locationId         String?        @map("location")
-  resource           Room?          @relation("ClassInstance_resource", fields: [resourceId], references: [id])
-  resourceId         String?        @map("resource")
-  endsAt             DateTime?
-  changeHistory      Json?          @default("[]")
-  occurrenceKey      String?        @unique
-  classSchedule      ClassSchedule? @relation("ClassInstance_classSchedule", fields: [classScheduleId], references: [id])
-  classScheduleId    String?        @map("classSchedule")
-  date               DateTime
-  instructor         Instructor?    @relation("ClassInstance_instructor", fields: [instructorId], references: [id])
-  instructorId       String?        @map("instructor")
-  maxCapacity        Int?
-  isCancelled        Boolean        @default(false)
-  cancellationReason String         @default("")
-  bookings           ClassBooking[] @relation("ClassBooking_classInstance")
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @default(now()) @updatedAt
+  id                         String         @id @default(cuid())
+  organization               Organization   @relation("ClassInstance_organization", fields: [organizationId], references: [id])
+  organizationId             String         @map("organization")
+  location                   Location?      @relation("ClassInstance_location", fields: [locationId], references: [id])
+  locationId                 String?        @map("location")
+  resource                   Room?          @relation("ClassInstance_resource", fields: [resourceId], references: [id])
+  resourceId                 String?        @map("resource")
+  endsAt                     DateTime?
+  changeHistory              Json?          @default("[]")
+  occurrenceKey              String?        @unique
+  classSchedule              ClassSchedule? @relation("ClassInstance_classSchedule", fields: [classScheduleId], references: [id])
+  classScheduleId            String?        @map("classSchedule")
+  date                       DateTime
+  instructor                 Instructor?    @relation("ClassInstance_instructor", fields: [instructorId], references: [id])
+  instructorId               String?        @map("instructor")
+  maxCapacity                Int?
+  closedAt                   DateTime?
+  closedBy                   User?          @relation("ClassInstance_closedBy", fields: [closedById], references: [id])
+  closedById                 String?        @map("closedBy")
+  isCancelled                Boolean        @default(false)
+  cancellationReason         String         @default("")
+  bookings                   ClassBooking[] @relation("ClassBooking_classInstance")
+  createdAt                  DateTime       @default(now())
+  updatedAt                  DateTime       @default(now()) @updatedAt
+  from_PayLine_classInstance PayLine[]      @relation("PayLine_classInstance")
 
   @@unique([organizationId, classScheduleId, date])
   @@index([organizationId])
@@ -1305,6 +1452,7 @@ model ClassInstance {
   @@index([resourceId])
   @@index([classScheduleId])
   @@index([instructorId])
+  @@index([closedById])
 }
 
 model Room {
@@ -1398,6 +1546,8 @@ model Appointment {
   createdAt                            DateTime              @default(now())
   updatedAt                            DateTime              @default(now()) @updatedAt
   from_CreditEntry_appointment         CreditEntry[]         @relation("CreditEntry_appointment")
+  from_Fee_appointment                 Fee[]                 @relation("Fee_appointment")
+  from_PayLine_appointment             PayLine[]             @relation("PayLine_appointment")
   from_TrainingCreditEntry_appointment TrainingCreditEntry[] @relation("TrainingCreditEntry_appointment")
   from_Appointment_replacesAppointment Appointment[]         @relation("Appointment_replacesAppointment")
 

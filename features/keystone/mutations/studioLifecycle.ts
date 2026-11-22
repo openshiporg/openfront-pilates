@@ -1,4 +1,5 @@
 import { appendHistory, historyEntry } from "../lib/spots";
+import { assessFee, classPolicy, quoteBookingCancellation } from "../lib/fees";
 import { assertInstructorQualifications } from "./trainerQualifications";
 import { assertNoPendingMembershipFreeze, restoreBookingCredit, assertMembershipServiceEligibility } from "../lib/membership-credits";
 import { assertParticipationAllowed, lockParticipationPolicy } from "../lib/operational-policy";
@@ -55,7 +56,7 @@ export function isLateCancellation(classStart: Date, now: Date, windowHours: num
 
 export async function cancelCapacityControlledBooking(
   prisma: any,
-  input: { bookingId: string; actor: LifecycleActor; pastBookingReason?: string }
+  input: { bookingId: string; actor: LifecycleActor; pastBookingReason?: string; applyPolicy?: boolean }
 ) {
   prisma = guardKeystonePrismaResults(prisma);
   // Staff correction for a confirmed booking on a class that already started and was never
@@ -79,7 +80,7 @@ export async function cancelCapacityControlledBooking(
     const booking = await transaction.classBooking.findFirst({
       where: { id: input.bookingId, organizationId: input.actor.organizationId },
       include: {
-        classInstance: { select: { id: true, date: true, organizationId: true, isCancelled: true } },
+        classInstance: { select: { id: true, date: true, organizationId: true, isCancelled: true, classSchedule: { select: { classType: { select: { cancelWindowHoursOverride: true, lateCancelFeeOverride: true, noShowFeeOverride: true } } } } } },
         member: {
           include: {
             user: {
@@ -122,9 +123,11 @@ export async function cancelCapacityControlledBooking(
       throw new Error("A class booking cannot be cancelled after the class starts");
     }
 
-    // Members (not staff) cancelling a confirmed place inside the club's window forfeit the credit or drop-in fee.
-    const late = !past && booking.status === "confirmed" && !input.actor.canManageAllRecords
-      && isLateCancellation(booking.classInstance.date, new Date(), await lateCancelWindowHours(transaction, input.actor.organizationId!));
+    // Members cancelling a confirmed place inside the window (studio default or class-type override)
+    // lose the credit, or an unlimited member is charged the fee (D5). Staff cancels are free unless
+    // staff choose to apply the policy (input.applyPolicy).
+    const quote = past ? null : await quoteBookingCancellation(transaction, booking, new Date(), input.actor.canManageAllRecords && !input.applyPolicy);
+    const late = Boolean(quote?.late) && booking.status === "confirmed";
 
     await transaction.classBooking.update({
       where: { id: booking.id },
@@ -140,6 +143,12 @@ export async function cancelCapacityControlledBooking(
     });
 
     if (booking.status === "confirmed" && !late && !isDropInBooking(booking)) await restoreBookingCredit(transaction, booking.id);
+    let feeId: string | null = null;
+    if (late && quote && (quote.consequence === "fee" || quote.consequence === "fee_waived")) {
+      const policy = await classPolicy(transaction, input.actor.organizationId!, booking.classInstance.classSchedule?.classType ?? null);
+      const fee = await assessFee(transaction, { organizationId: input.actor.organizationId!, memberId: booking.memberId, bookingId: booking.id, kind: "late_cancel", amount: policy.lateCancelFee, currencyCode: policy.currencyCode, waivedBasis: quote.consequence === "fee_waived" ? "allowance" : null });
+      feeId = fee.id;
+    }
     await enqueueOperationalNotice(transaction, { organizationId: input.actor.organizationId!, memberId: booking.memberId,
       key: `booking:${booking.id}:cancelled`, kind: "cancellation", message: late
         ? "Your class booking has been cancelled. It was inside the club's late-cancel window, so the class credit or drop-in fee isn't returned."
@@ -163,6 +172,8 @@ export async function cancelCapacityControlledBooking(
       classInstanceId: booking.classInstance.id,
       cancelled: true,
       lateCancelled: late,
+      quote,
+      feeId,
       releasedConfirmedSpot,
       promotion,
     };
@@ -266,6 +277,8 @@ export async function cancelCapacityControlledClassInstance(
       where: { id: classInstance.id },
       data: { isCancelled: true, cancellationReason: reason },
     });
+    // A cancelled class pays nothing (D8): any accrued line is voided.
+    await transaction.payLine.updateMany({ where: { organizationId: input.actor.organizationId!, classInstanceId: classInstance.id, status: "accrued" }, data: { status: "void" } });
 
     return {
       classInstanceId: classInstance.id,
@@ -307,6 +320,7 @@ async function loadStaffAttendanceBooking(transaction: any, bookingId: string, a
     throw new Error("Attendance can only be marked for a confirmed booking");
   }
   if (booking.classInstance.isCancelled) throw new Error("Attendance cannot be marked for a cancelled class");
+  if (booking.classInstance.closedAt) throw new Error("This class is closed. Reopen it to change attendance.");
   if (booking.classInstance.date.getTime() > Date.now()) {
     throw new Error("Attendance cannot be marked before the class starts");
   }

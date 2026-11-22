@@ -64,6 +64,11 @@ export interface PaymentProviderAdapter {
   retrieveCounterCheckout?(providerSessionId: string): Promise<Stripe.Checkout.Session>;
   expireCounterCheckout?(providerSessionId: string): Promise<Stripe.Checkout.Session>;
   createSetupIntent(customerId: string): Promise<{ id: string; clientSecret: string | null }>;
+  /**
+   * Charges a saved card without the client present (late-cancel and no-show fees, D5). Resolves
+   * with the provider's outcome; a decline is "failed", never thrown, so the fee can stay owed.
+   */
+  chargeSavedPaymentMethod?(input: { customerId: string; paymentMethodId?: string | null; amount: number; currencyCode: string; description: string; metadata: Record<string, string>; idempotencyKey: string }): Promise<{ status: "succeeded" | "failed" | "pending"; paymentIntentId: string | null; failureMessage?: string | null }>;
   cancelSubscriptionAtPeriodEnd(subscriptionId: string, idempotencyKey?: string, cancelAt?: Date | null): Promise<Stripe.Subscription>;
   cancelSubscriptionNow(subscriptionId: string, idempotencyKey?: string): Promise<Stripe.Subscription>;
   pauseSubscription(subscriptionId: string, resumeDate?: Date, idempotencyKey?: string): Promise<Stripe.Subscription>;

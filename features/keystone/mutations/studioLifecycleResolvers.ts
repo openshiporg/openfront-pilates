@@ -28,11 +28,17 @@ export async function cancelClassBooking(
   });
   const late = Boolean((result as { lateCancelled?: boolean }).lateCancelled);
   if (result.cancelled && !late) await refundCancelledDropIns(context, actor.organizationId!, [result.bookingId]);
+  // A late-cancel fee is charged to the saved card on this same request (D5); failure leaves it owed.
+  const feeId = (result as { feeId?: string | null }).feeId;
+  if (feeId) {
+    const { chargeAssessedFee } = await import("./fees");
+    await chargeAssessedFee(context, feeId);
+  }
   const booking = await context.db.ClassBooking.findOne({ where: { id: result.bookingId } });
   return {
     booking,
     promoted: result.promotion.promoted,
-    message: !result.cancelled ? "Booking was already cancelled" : late ? "Booking cancelled inside the late-cancel window; the credit isn't returned" : "Booking cancelled",
+    message: !result.cancelled ? "Booking was already cancelled" : late ? ((result as any).quote?.message ?? "Booking cancelled inside the late-cancel window") : "Booking cancelled",
   };
 }
 

@@ -38,9 +38,11 @@ import { CounterPaymentAttempt } from './CounterPaymentAttempt';
 import { StaffIntent } from './StaffIntent';
 import { Spot } from './Spot';
 import { ClassPack, CreditGrant, CreditEntry } from './Credits';
+import { Fee } from './Fee';
+import { PayRate, PayLine, PayrollRun } from './Payroll';
 
 export const models = {
-  Spot, ClassPack, CreditGrant, CreditEntry,
+  Spot, ClassPack, CreditGrant, CreditEntry, Fee, PayRate, PayLine, PayrollRun,
   RetailItem, RetailSale, RetailReturn, RetailStockEntry, RetailClose, CounterPaymentAttempt, StaffIntent,
   MemberImportRecord,
   TrainingPackage, TrainingCreditEntry,

@@ -634,6 +634,492 @@ input UserRelateToOneForCreateInput {
   connect: UserWhereUniqueInput
 }
 
+type Fee {
+  id: ID!
+  organization: Organization
+  member: Member
+  booking: ClassBooking
+  appointment: Appointment
+  feeKey: String
+  kind: String
+  amount: Int
+  currencyCode: String
+  status: String
+  payment: Payment
+  providerPaymentIntentId: String
+  failureMessage: String
+  waivedBy: User
+  waivedReason: String
+  waivedBasis: String
+  refundedAt: DateTime
+  history: JSON
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input FeeWhereUniqueInput {
+  id: ID
+}
+
+input FeeWhereInput {
+  AND: [FeeWhereInput!]
+  OR: [FeeWhereInput!]
+  NOT: [FeeWhereInput!]
+  id: IDFilter
+  organization: OrganizationWhereInput
+  member: MemberWhereInput
+  booking: ClassBookingWhereInput
+  appointment: AppointmentWhereInput
+  feeKey: StringFilter
+  kind: StringFilter
+  amount: IntFilter
+  currencyCode: StringFilter
+  status: StringFilter
+  payment: PaymentWhereInput
+  providerPaymentIntentId: StringFilter
+  failureMessage: StringFilter
+  waivedBy: UserWhereInput
+  waivedReason: StringFilter
+  waivedBasis: StringFilter
+  refundedAt: DateTimeNullableFilter
+  createdAt: DateTimeFilter
+  updatedAt: DateTimeFilter
+}
+
+input FeeOrderByInput {
+  id: OrderDirection
+  feeKey: OrderDirection
+  kind: OrderDirection
+  amount: OrderDirection
+  currencyCode: OrderDirection
+  status: OrderDirection
+  providerPaymentIntentId: OrderDirection
+  failureMessage: OrderDirection
+  waivedReason: OrderDirection
+  waivedBasis: OrderDirection
+  refundedAt: OrderDirection
+  createdAt: OrderDirection
+  updatedAt: OrderDirection
+}
+
+input FeeUpdateInput {
+  organization: OrganizationRelateToOneForUpdateInput
+  member: MemberRelateToOneForUpdateInput
+  booking: ClassBookingRelateToOneForUpdateInput
+  appointment: AppointmentRelateToOneForUpdateInput
+  feeKey: String
+  kind: String
+  amount: Int
+  currencyCode: String
+  status: String
+  payment: PaymentRelateToOneForUpdateInput
+  providerPaymentIntentId: String
+  failureMessage: String
+  waivedBy: UserRelateToOneForUpdateInput
+  waivedReason: String
+  waivedBasis: String
+  refundedAt: DateTime
+  history: JSON
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input FeeUpdateArgs {
+  where: FeeWhereUniqueInput!
+  data: FeeUpdateInput!
+}
+
+input FeeCreateInput {
+  organization: OrganizationRelateToOneForCreateInput
+  member: MemberRelateToOneForCreateInput
+  booking: ClassBookingRelateToOneForCreateInput
+  appointment: AppointmentRelateToOneForCreateInput
+  feeKey: String
+  kind: String
+  amount: Int
+  currencyCode: String
+  status: String
+  payment: PaymentRelateToOneForCreateInput
+  providerPaymentIntentId: String
+  failureMessage: String
+  waivedBy: UserRelateToOneForCreateInput
+  waivedReason: String
+  waivedBasis: String
+  refundedAt: DateTime
+  history: JSON
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+type PayRate {
+  id: ID!
+  organization: Organization
+  instructor: Instructor
+  classBase: Int
+  perHeadBonus: Int
+  bonusAbove: Int
+  floor: Int
+  privateAmount: Int
+  duetAmount: Int
+  trioAmount: Int
+  hourlyAmount: Int
+  currencyCode: String
+  effectiveFrom: DateTime
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input PayRateWhereUniqueInput {
+  id: ID
+}
+
+input PayRateWhereInput {
+  AND: [PayRateWhereInput!]
+  OR: [PayRateWhereInput!]
+  NOT: [PayRateWhereInput!]
+  id: IDFilter
+  organization: OrganizationWhereInput
+  instructor: InstructorWhereInput
+  classBase: IntFilter
+  perHeadBonus: IntFilter
+  bonusAbove: IntFilter
+  floor: IntFilter
+  privateAmount: IntFilter
+  duetAmount: IntFilter
+  trioAmount: IntFilter
+  hourlyAmount: IntFilter
+  currencyCode: StringFilter
+  effectiveFrom: DateTimeFilter
+  createdAt: DateTimeFilter
+  updatedAt: DateTimeFilter
+}
+
+input PayRateOrderByInput {
+  id: OrderDirection
+  classBase: OrderDirection
+  perHeadBonus: OrderDirection
+  bonusAbove: OrderDirection
+  floor: OrderDirection
+  privateAmount: OrderDirection
+  duetAmount: OrderDirection
+  trioAmount: OrderDirection
+  hourlyAmount: OrderDirection
+  currencyCode: OrderDirection
+  effectiveFrom: OrderDirection
+  createdAt: OrderDirection
+  updatedAt: OrderDirection
+}
+
+input PayRateUpdateInput {
+  organization: OrganizationRelateToOneForUpdateInput
+  instructor: InstructorRelateToOneForUpdateInput
+  classBase: Int
+  perHeadBonus: Int
+  bonusAbove: Int
+  floor: Int
+  privateAmount: Int
+  duetAmount: Int
+  trioAmount: Int
+  hourlyAmount: Int
+  currencyCode: String
+  effectiveFrom: DateTime
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input InstructorRelateToOneForUpdateInput {
+  create: InstructorCreateInput
+  connect: InstructorWhereUniqueInput
+  disconnect: Boolean
+}
+
+input PayRateUpdateArgs {
+  where: PayRateWhereUniqueInput!
+  data: PayRateUpdateInput!
+}
+
+input PayRateCreateInput {
+  organization: OrganizationRelateToOneForCreateInput
+  instructor: InstructorRelateToOneForCreateInput
+  classBase: Int
+  perHeadBonus: Int
+  bonusAbove: Int
+  floor: Int
+  privateAmount: Int
+  duetAmount: Int
+  trioAmount: Int
+  hourlyAmount: Int
+  currencyCode: String
+  effectiveFrom: DateTime
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input InstructorRelateToOneForCreateInput {
+  create: InstructorCreateInput
+  connect: InstructorWhereUniqueInput
+}
+
+type PayLine {
+  id: ID!
+  organization: Organization
+  instructor: Instructor
+  lineKey: String
+  kind: String
+  classInstance: ClassInstance
+  appointment: Appointment
+  workDate: DateTime
+  headcount: Int
+  hours: Int
+  amount: Int
+  currencyCode: String
+  rule: String
+  note: String
+  status: String
+  run: PayrollRun
+  payRate: PayRate
+  createdBy: User
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input PayLineWhereUniqueInput {
+  id: ID
+}
+
+input PayLineWhereInput {
+  AND: [PayLineWhereInput!]
+  OR: [PayLineWhereInput!]
+  NOT: [PayLineWhereInput!]
+  id: IDFilter
+  organization: OrganizationWhereInput
+  instructor: InstructorWhereInput
+  lineKey: StringFilter
+  kind: StringFilter
+  classInstance: ClassInstanceWhereInput
+  appointment: AppointmentWhereInput
+  workDate: DateTimeFilter
+  headcount: IntNullableFilter
+  hours: IntNullableFilter
+  amount: IntFilter
+  currencyCode: StringFilter
+  rule: StringFilter
+  note: StringFilter
+  status: StringFilter
+  run: PayrollRunWhereInput
+  payRate: PayRateWhereInput
+  createdBy: UserWhereInput
+  createdAt: DateTimeFilter
+  updatedAt: DateTimeFilter
+}
+
+input PayLineOrderByInput {
+  id: OrderDirection
+  lineKey: OrderDirection
+  kind: OrderDirection
+  workDate: OrderDirection
+  headcount: OrderDirection
+  hours: OrderDirection
+  amount: OrderDirection
+  currencyCode: OrderDirection
+  rule: OrderDirection
+  note: OrderDirection
+  status: OrderDirection
+  createdAt: OrderDirection
+  updatedAt: OrderDirection
+}
+
+input PayLineUpdateInput {
+  organization: OrganizationRelateToOneForUpdateInput
+  instructor: InstructorRelateToOneForUpdateInput
+  lineKey: String
+  kind: String
+  classInstance: ClassInstanceRelateToOneForUpdateInput
+  appointment: AppointmentRelateToOneForUpdateInput
+  workDate: DateTime
+  headcount: Int
+  hours: Int
+  amount: Int
+  currencyCode: String
+  rule: String
+  note: String
+  status: String
+  run: PayrollRunRelateToOneForUpdateInput
+  payRate: PayRateRelateToOneForUpdateInput
+  createdBy: UserRelateToOneForUpdateInput
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input ClassInstanceRelateToOneForUpdateInput {
+  create: ClassInstanceCreateInput
+  connect: ClassInstanceWhereUniqueInput
+  disconnect: Boolean
+}
+
+input PayrollRunRelateToOneForUpdateInput {
+  create: PayrollRunCreateInput
+  connect: PayrollRunWhereUniqueInput
+  disconnect: Boolean
+}
+
+input PayRateRelateToOneForUpdateInput {
+  create: PayRateCreateInput
+  connect: PayRateWhereUniqueInput
+  disconnect: Boolean
+}
+
+input PayLineUpdateArgs {
+  where: PayLineWhereUniqueInput!
+  data: PayLineUpdateInput!
+}
+
+input PayLineCreateInput {
+  organization: OrganizationRelateToOneForCreateInput
+  instructor: InstructorRelateToOneForCreateInput
+  lineKey: String
+  kind: String
+  classInstance: ClassInstanceRelateToOneForCreateInput
+  appointment: AppointmentRelateToOneForCreateInput
+  workDate: DateTime
+  headcount: Int
+  hours: Int
+  amount: Int
+  currencyCode: String
+  rule: String
+  note: String
+  status: String
+  run: PayrollRunRelateToOneForCreateInput
+  payRate: PayRateRelateToOneForCreateInput
+  createdBy: UserRelateToOneForCreateInput
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input ClassInstanceRelateToOneForCreateInput {
+  create: ClassInstanceCreateInput
+  connect: ClassInstanceWhereUniqueInput
+}
+
+input PayrollRunRelateToOneForCreateInput {
+  create: PayrollRunCreateInput
+  connect: PayrollRunWhereUniqueInput
+}
+
+input PayRateRelateToOneForCreateInput {
+  create: PayRateCreateInput
+  connect: PayRateWhereUniqueInput
+}
+
+type PayrollRun {
+  id: ID!
+  organization: Organization
+  periodStart: DateTime
+  periodEnd: DateTime
+  status: String
+  total: Int
+  currencyCode: String
+  payouts: JSON
+  lines(where: PayLineWhereInput! = {}, orderBy: [PayLineOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: PayLineWhereUniqueInput): [PayLine!]
+  linesCount(where: PayLineWhereInput! = {}): Int
+  lockedAt: DateTime
+  lockedBy: User
+  paidAt: DateTime
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input PayrollRunWhereUniqueInput {
+  id: ID
+}
+
+input PayrollRunWhereInput {
+  AND: [PayrollRunWhereInput!]
+  OR: [PayrollRunWhereInput!]
+  NOT: [PayrollRunWhereInput!]
+  id: IDFilter
+  organization: OrganizationWhereInput
+  periodStart: DateTimeFilter
+  periodEnd: DateTimeFilter
+  status: StringFilter
+  total: IntNullableFilter
+  currencyCode: StringFilter
+  lines: PayLineManyRelationFilter
+  lockedAt: DateTimeNullableFilter
+  lockedBy: UserWhereInput
+  paidAt: DateTimeNullableFilter
+  createdAt: DateTimeFilter
+  updatedAt: DateTimeFilter
+}
+
+input PayLineManyRelationFilter {
+  every: PayLineWhereInput
+  some: PayLineWhereInput
+  none: PayLineWhereInput
+}
+
+input PayrollRunOrderByInput {
+  id: OrderDirection
+  periodStart: OrderDirection
+  periodEnd: OrderDirection
+  status: OrderDirection
+  total: OrderDirection
+  currencyCode: OrderDirection
+  lockedAt: OrderDirection
+  paidAt: OrderDirection
+  createdAt: OrderDirection
+  updatedAt: OrderDirection
+}
+
+input PayrollRunUpdateInput {
+  organization: OrganizationRelateToOneForUpdateInput
+  periodStart: DateTime
+  periodEnd: DateTime
+  status: String
+  total: Int
+  currencyCode: String
+  payouts: JSON
+  lines: PayLineRelateToManyForUpdateInput
+  lockedAt: DateTime
+  lockedBy: UserRelateToOneForUpdateInput
+  paidAt: DateTime
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input PayLineRelateToManyForUpdateInput {
+  disconnect: [PayLineWhereUniqueInput!]
+  set: [PayLineWhereUniqueInput!]
+  create: [PayLineCreateInput!]
+  connect: [PayLineWhereUniqueInput!]
+}
+
+input PayrollRunUpdateArgs {
+  where: PayrollRunWhereUniqueInput!
+  data: PayrollRunUpdateInput!
+}
+
+input PayrollRunCreateInput {
+  organization: OrganizationRelateToOneForCreateInput
+  periodStart: DateTime
+  periodEnd: DateTime
+  status: String
+  total: Int
+  currencyCode: String
+  payouts: JSON
+  lines: PayLineRelateToManyForCreateInput
+  lockedAt: DateTime
+  lockedBy: UserRelateToOneForCreateInput
+  paidAt: DateTime
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input PayLineRelateToManyForCreateInput {
+  create: [PayLineCreateInput!]
+  connect: [PayLineWhereUniqueInput!]
+}
+
 type RetailItem {
   id: ID!
   organization: Organization
@@ -4130,6 +4616,9 @@ type Payment {
   amount: Int
   currencyCode: String
   status: String
+  purpose: String
+  method: String
+  recordedBy: User
   paymentDate: DateTime
   metadata: JSON
   stripePaymentIntentId: String
@@ -4167,6 +4656,9 @@ input PaymentWhereInput {
   amount: IntFilter
   currencyCode: StringFilter
   status: StringFilter
+  purpose: StringNullableFilter
+  method: StringNullableFilter
+  recordedBy: UserWhereInput
   paymentDate: DateTimeFilter
   stripePaymentIntentId: StringNullableFilter
   stripeChargeId: StringNullableFilter
@@ -4188,6 +4680,8 @@ input PaymentOrderByInput {
   amount: OrderDirection
   currencyCode: OrderDirection
   status: OrderDirection
+  purpose: OrderDirection
+  method: OrderDirection
   paymentDate: OrderDirection
   stripePaymentIntentId: OrderDirection
   stripeChargeId: OrderDirection
@@ -4212,6 +4706,9 @@ input PaymentUpdateInput {
   amount: Int
   currencyCode: String
   status: String
+  purpose: String
+  method: String
+  recordedBy: UserRelateToOneForUpdateInput
   paymentDate: DateTime
   metadata: JSON
   stripePaymentIntentId: String
@@ -4255,6 +4752,9 @@ input PaymentCreateInput {
   amount: Int
   currencyCode: String
   status: String
+  purpose: String
+  method: String
+  recordedBy: UserRelateToOneForCreateInput
   paymentDate: DateTime
   metadata: JSON
   stripePaymentIntentId: String
@@ -5424,12 +5924,6 @@ input ClassScheduleUpdateInput {
   updatedAt: DateTime
 }
 
-input InstructorRelateToOneForUpdateInput {
-  create: InstructorCreateInput
-  connect: InstructorWhereUniqueInput
-  disconnect: Boolean
-}
-
 input ClassTypeRelateToOneForUpdateInput {
   create: ClassTypeCreateInput
   connect: ClassTypeWhereUniqueInput
@@ -5459,11 +5953,6 @@ input ClassScheduleCreateInput {
   updatedAt: DateTime
 }
 
-input InstructorRelateToOneForCreateInput {
-  create: InstructorCreateInput
-  connect: InstructorWhereUniqueInput
-}
-
 input ClassTypeRelateToOneForCreateInput {
   create: ClassTypeCreateInput
   connect: ClassTypeWhereUniqueInput
@@ -5488,6 +5977,7 @@ type ClassBooking {
   waitlistPosition: Int
   bookedAt: DateTime
   lateCancelled: Boolean
+  checkedInAt: DateTime
   cancelledAt: DateTime
   createdAt: DateTime
   updatedAt: DateTime
@@ -5517,6 +6007,7 @@ input ClassBookingWhereInput {
   waitlistPosition: IntNullableFilter
   bookedAt: DateTimeFilter
   lateCancelled: BooleanFilter
+  checkedInAt: DateTimeNullableFilter
   cancelledAt: DateTimeNullableFilter
   createdAt: DateTimeFilter
   updatedAt: DateTimeFilter
@@ -5535,6 +6026,7 @@ input ClassBookingOrderByInput {
   waitlistPosition: OrderDirection
   bookedAt: OrderDirection
   lateCancelled: OrderDirection
+  checkedInAt: OrderDirection
   cancelledAt: OrderDirection
   createdAt: OrderDirection
   updatedAt: OrderDirection
@@ -5558,15 +6050,10 @@ input ClassBookingUpdateInput {
   waitlistPosition: Int
   bookedAt: DateTime
   lateCancelled: Boolean
+  checkedInAt: DateTime
   cancelledAt: DateTime
   createdAt: DateTime
   updatedAt: DateTime
-}
-
-input ClassInstanceRelateToOneForUpdateInput {
-  create: ClassInstanceCreateInput
-  connect: ClassInstanceWhereUniqueInput
-  disconnect: Boolean
 }
 
 input SpotRelateToOneForUpdateInput {
@@ -5598,14 +6085,10 @@ input ClassBookingCreateInput {
   waitlistPosition: Int
   bookedAt: DateTime
   lateCancelled: Boolean
+  checkedInAt: DateTime
   cancelledAt: DateTime
   createdAt: DateTime
   updatedAt: DateTime
-}
-
-input ClassInstanceRelateToOneForCreateInput {
-  create: ClassInstanceCreateInput
-  connect: ClassInstanceWhereUniqueInput
 }
 
 input SpotRelateToOneForCreateInput {
@@ -5723,6 +6206,8 @@ type ClassInstance {
   date: DateTime
   instructor: Instructor
   maxCapacity: Int
+  closedAt: DateTime
+  closedBy: User
   isCancelled: Boolean
   cancellationReason: String
   bookings(where: ClassBookingWhereInput! = {}, orderBy: [ClassBookingOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: ClassBookingWhereUniqueInput): [ClassBooking!]
@@ -5750,6 +6235,8 @@ input ClassInstanceWhereInput {
   date: DateTimeFilter
   instructor: InstructorWhereInput
   maxCapacity: IntNullableFilter
+  closedAt: DateTimeNullableFilter
+  closedBy: UserWhereInput
   isCancelled: BooleanFilter
   cancellationReason: StringFilter
   bookings: ClassBookingManyRelationFilter
@@ -5763,6 +6250,7 @@ input ClassInstanceOrderByInput {
   occurrenceKey: OrderDirection
   date: OrderDirection
   maxCapacity: OrderDirection
+  closedAt: OrderDirection
   isCancelled: OrderDirection
   cancellationReason: OrderDirection
   createdAt: OrderDirection
@@ -5780,6 +6268,8 @@ input ClassInstanceUpdateInput {
   date: DateTime
   instructor: InstructorRelateToOneForUpdateInput
   maxCapacity: Int
+  closedAt: DateTime
+  closedBy: UserRelateToOneForUpdateInput
   isCancelled: Boolean
   cancellationReason: String
   bookings: ClassBookingRelateToManyForUpdateInput
@@ -5803,6 +6293,8 @@ input ClassInstanceCreateInput {
   date: DateTime
   instructor: InstructorRelateToOneForCreateInput
   maxCapacity: Int
+  closedAt: DateTime
+  closedBy: UserRelateToOneForCreateInput
   isCancelled: Boolean
   cancellationReason: String
   bookings: ClassBookingRelateToManyForCreateInput
@@ -6610,6 +7102,30 @@ type Mutation {
   updateCreditEntries(data: [CreditEntryUpdateArgs!]!): [CreditEntry]
   deleteCreditEntry(where: CreditEntryWhereUniqueInput!): CreditEntry
   deleteCreditEntries(where: [CreditEntryWhereUniqueInput!]!): [CreditEntry]
+  createFee(data: FeeCreateInput!): Fee
+  createFees(data: [FeeCreateInput!]!): [Fee]
+  updateFee(where: FeeWhereUniqueInput!, data: FeeUpdateInput!): Fee
+  updateFees(data: [FeeUpdateArgs!]!): [Fee]
+  deleteFee(where: FeeWhereUniqueInput!): Fee
+  deleteFees(where: [FeeWhereUniqueInput!]!): [Fee]
+  createPayRate(data: PayRateCreateInput!): PayRate
+  createPayRates(data: [PayRateCreateInput!]!): [PayRate]
+  updatePayRate(where: PayRateWhereUniqueInput!, data: PayRateUpdateInput!): PayRate
+  updatePayRates(data: [PayRateUpdateArgs!]!): [PayRate]
+  deletePayRate(where: PayRateWhereUniqueInput!): PayRate
+  deletePayRates(where: [PayRateWhereUniqueInput!]!): [PayRate]
+  createPayLine(data: PayLineCreateInput!): PayLine
+  createPayLines(data: [PayLineCreateInput!]!): [PayLine]
+  updatePayLine(where: PayLineWhereUniqueInput!, data: PayLineUpdateInput!): PayLine
+  updatePayLines(data: [PayLineUpdateArgs!]!): [PayLine]
+  deletePayLine(where: PayLineWhereUniqueInput!): PayLine
+  deletePayLines(where: [PayLineWhereUniqueInput!]!): [PayLine]
+  createPayrollRun(data: PayrollRunCreateInput!): PayrollRun
+  createPayrollRuns(data: [PayrollRunCreateInput!]!): [PayrollRun]
+  updatePayrollRun(where: PayrollRunWhereUniqueInput!, data: PayrollRunUpdateInput!): PayrollRun
+  updatePayrollRuns(data: [PayrollRunUpdateArgs!]!): [PayrollRun]
+  deletePayrollRun(where: PayrollRunWhereUniqueInput!): PayrollRun
+  deletePayrollRuns(where: [PayrollRunWhereUniqueInput!]!): [PayrollRun]
   createRetailItem(data: RetailItemCreateInput!): RetailItem
   createRetailItems(data: [RetailItemCreateInput!]!): [RetailItem]
   updateRetailItem(where: RetailItemWhereUniqueInput!, data: RetailItemUpdateInput!): RetailItem
@@ -6962,6 +7478,16 @@ type Mutation {
   startPackCheckout(classPackId: ID!): PackCheckoutResult!
   completePackCheckout(providerSessionId: String!): PackCompletionResult!
   adjustCredits(memberId: ID!, grantId: ID, delta: Int!, reason: String!, kind: String, validDays: Int, idempotencyKey: String!): JSON!
+  payFee(feeId: ID!, method: String, reference: String): JSON!
+  waiveFee(feeId: ID!, reason: String!): JSON!
+  refundFee(feeId: ID!, reason: String!): JSON!
+  closeClass(classInstanceId: ID!): JSON!
+  reopenClass(classInstanceId: ID!): JSON!
+  savePayRate(instructorId: ID!, data: JSON!): JSON!
+  addPayLine(instructorId: ID!, kind: String!, workDate: String!, minutes: Int, amount: Int, note: String!, idempotencyKey: String!): JSON!
+  openPayrollRun(from: String!, to: String!): JSON!
+  lockPayrollRun(runId: ID!): JSON!
+  markPayrollPaid(runId: ID!, payouts: JSON!): JSON!
   startGiftCardCheckout(amount: Int!, purchaserName: String!, purchaserEmail: String!, recipientName: String, recipientEmail: String, message: String): GiftCardCheckout!
   confirmGiftCardOrder(ref: ID!, token: String!): GiftCardOrder!
   redeemGiftCard(code: String!, amount: Int!, requestKey: String!, note: String!): JSON!
@@ -7012,6 +7538,18 @@ type Query {
   creditEntry(where: CreditEntryWhereUniqueInput!): CreditEntry
   creditEntries(where: CreditEntryWhereInput! = {}, orderBy: [CreditEntryOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: CreditEntryWhereUniqueInput): [CreditEntry!]
   creditEntriesCount(where: CreditEntryWhereInput! = {}): Int
+  fee(where: FeeWhereUniqueInput!): Fee
+  fees(where: FeeWhereInput! = {}, orderBy: [FeeOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: FeeWhereUniqueInput): [Fee!]
+  feesCount(where: FeeWhereInput! = {}): Int
+  payRate(where: PayRateWhereUniqueInput!): PayRate
+  payRates(where: PayRateWhereInput! = {}, orderBy: [PayRateOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: PayRateWhereUniqueInput): [PayRate!]
+  payRatesCount(where: PayRateWhereInput! = {}): Int
+  payLine(where: PayLineWhereUniqueInput!): PayLine
+  payLines(where: PayLineWhereInput! = {}, orderBy: [PayLineOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: PayLineWhereUniqueInput): [PayLine!]
+  payLinesCount(where: PayLineWhereInput! = {}): Int
+  payrollRun(where: PayrollRunWhereUniqueInput!): PayrollRun
+  payrollRuns(where: PayrollRunWhereInput! = {}, orderBy: [PayrollRunOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: PayrollRunWhereUniqueInput): [PayrollRun!]
+  payrollRunsCount(where: PayrollRunWhereInput! = {}): Int
   retailItem(where: RetailItemWhereUniqueInput!): RetailItem
   retailItems(where: RetailItemWhereInput! = {}, orderBy: [RetailItemOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: RetailItemWhereUniqueInput): [RetailItem!]
   retailItemsCount(where: RetailItemWhereInput! = {}): Int
@@ -7191,6 +7729,9 @@ type Query {
   classAvailability(classInstanceId: ID!): JSON!
   roomsWorkspace: JSON!
   myCredits(memberId: ID): JSON!
+  quoteCancellation(bookingId: ID!): JSON!
+  payrollWorkspace: JSON!
+  exportPayrollRun(runId: ID!): JSON!
   giftCardOptions: GiftCardOptions!
   lookupGiftCard(code: String!): JSON!
   giftCardsWorkspace(skip: Int = 0): JSON!

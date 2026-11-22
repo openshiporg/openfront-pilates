@@ -49,7 +49,7 @@ export const ClassPack = list({
  * Expiry is computed on read (expiresAt), never by a timer.
  */
 export const CreditGrant = list({
-  db: { extendPrismaSchema: compoundUniqueDb("organizationId, sourceKey") },
+  db: { extendPrismaSchema: (schema: string) => compoundUniqueDb("organizationId, sourceKey")(schema).replace(/\n}$/, '\n  @@index([organizationId, memberId, kind, status, expiresAt], map: "CreditGrant_spend_idx")\n}') },
   access: { operation: { query: isSignedIn, create: denyAll, update: denyAll, delete: denyAll }, filter: { query: ownOrStaff } },
   ui: { listView: { initialColumns: ["member", "source", "kind", "quantity", "remaining", "expiresAt", "status"] } },
   fields: {

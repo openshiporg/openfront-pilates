@@ -100,7 +100,9 @@ export const Payment = list({
         { label: 'Pending', value: 'pending' },
         { label: 'Succeeded', value: 'succeeded' },
         { label: 'Failed', value: 'failed' },
+        { label: 'Partially refunded', value: 'partially_refunded' },
         { label: 'Refunded', value: 'refunded' },
+        { label: 'Expired', value: 'expired' },
       ],
       defaultValue: 'pending',
       validation: { isRequired: true },
@@ -108,6 +110,21 @@ export const Payment = list({
         description: 'Payment status',
       },
     }),
+
+    // Dissertation 4.5: one payment has one purpose and one method.
+    purpose: select({
+      type: 'string',
+      options: ['drop_in', 'pack', 'membership', 'appointment', 'fee', 'gift_card', 'retail'].map((value) => ({ label: value, value })),
+      db: { isNullable: true },
+      access: { create: denyAll, update: denyAll },
+    }),
+    method: select({
+      type: 'string',
+      options: ['stripe', 'terminal', 'cash', 'bank_transfer', 'gift_card'].map((value) => ({ label: value, value })),
+      defaultValue: 'stripe',
+      access: { create: denyAll, update: denyAll },
+    }),
+    recordedBy: relationship({ ref: 'User', access: { create: denyAll, update: denyAll } }),
 
     paymentDate: timestamp({
       defaultValue: { kind: 'now' },

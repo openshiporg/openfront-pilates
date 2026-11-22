@@ -122,6 +122,9 @@ export const ClassInstance = list({
       },
     }),
 
+    // Close class (W5.5): set by closeClass, cleared by reopenClass.
+    closedAt: timestamp({ access: { create: denyAll, update: denyAll } }),
+    closedBy: relationship({ ref: "User", access: { create: denyAll, update: denyAll } }),
     isCancelled: checkbox({
       access: { update: denyAll },
       defaultValue: false,

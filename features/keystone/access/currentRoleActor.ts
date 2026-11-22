@@ -8,7 +8,7 @@ export async function currentRoleActor(context: any) {
 
   const user = await context.query.User.findOne({
     where: { id: session.itemId },
-    query: "id organization { id } role { id canManageAllRecords canManagePeople canManageCheckIns canManageFacilities isInstructor organization { id } }",
+    query: "id organization { id } role { id canManageAllRecords canManagePeople canManageCheckIns canManageFacilities canManagePayroll isInstructor organization { id } }",
   });
   if (!user || user.organization?.id !== organizationId || (user.role && user.role.organization?.id !== organizationId)) {
     throw new Error("Actor organization mismatch");
@@ -22,6 +22,7 @@ export async function currentRoleActor(context: any) {
     canManagePeople: Boolean(role?.canManagePeople),
     canManageCheckIns: Boolean(role?.canManageCheckIns),
     canManageFacilities: Boolean(role?.canManageFacilities),
+    canManagePayroll: Boolean(role?.canManagePayroll),
     isInstructor: Boolean(role?.isInstructor),
   };
 }

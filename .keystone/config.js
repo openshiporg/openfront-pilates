@@ -316,9 +316,9 @@ ${additions}
 }
 function connectedRelationshipId(value) {
   if (!value || typeof value !== "object") return void 0;
-  const relationship40 = value;
-  if (relationship40.disconnect) return null;
-  return typeof relationship40.connect?.id === "string" ? relationship40.connect.id : void 0;
+  const relationship42 = value;
+  if (relationship42.disconnect) return null;
+  return typeof relationship42.connect?.id === "string" ? relationship42.connect.id : void 0;
 }
 function tenantOrganizationId(resolvedData, item) {
   const connected = connectedRelationshipId(resolvedData.organization);
@@ -568,13 +568,13 @@ var init_credits = __esm({
 });
 
 // features/keystone/lib/participation-terms.ts
-function isParticipationTermsPlaceholder(text42) {
+function isParticipationTermsPlaceholder(text44) {
   const normalize = (value) => value.replace(/[‘’]/g, "'").replace(/\s+/g, " ").trim().toLowerCase();
-  return normalize(text42) === normalize(PARTICIPATION_TERMS_PLACEHOLDER);
+  return normalize(text44) === normalize(PARTICIPATION_TERMS_PLACEHOLDER);
 }
-async function publishParticipationTerms(tx, organizationId, text42, publishedBy) {
+async function publishParticipationTerms(tx, organizationId, text44, publishedBy) {
   await lockParticipationPolicy(tx, organizationId);
-  const body = text42.trim();
+  const body = text44.trim();
   const enforce = Boolean(body) && !isParticipationTermsPlaceholder(body);
   const latest = await tx.participationPolicy.findFirst({ where: { organizationId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
   if (latest && latest.documentReference === PARTICIPATION_TERMS_PATH && latest.documentText === body && latest.enforceWaiver === enforce) return latest;
@@ -1135,8 +1135,8 @@ function historyEntry(action, extra = {}) {
   return { action, at: (/* @__PURE__ */ new Date()).toISOString(), ...extra };
 }
 function appendHistory(previous, entry) {
-  const list42 = Array.isArray(previous) ? previous : [];
-  return [...list42.slice(-99), entry];
+  const list44 = Array.isArray(previous) ? previous : [];
+  return [...list44.slice(-99), entry];
 }
 async function waitlistCutoffMinutes(tx, organizationId) {
   tx = guardKeystonePrismaResults(tx);
@@ -1199,12 +1199,12 @@ function verifiedInternalIdentity(headers, socketAddress, secret = String(proces
   const loopback = /^(?:127\.|::1$|::ffff:127\.)/.test(String(socketAddress || ""));
   if (!loopback || secret.length < 32) return null;
   const identity = header(headers, "x-openfront-client-identity");
-  const timestamp30 = header(headers, "x-openfront-client-timestamp");
+  const timestamp32 = header(headers, "x-openfront-client-timestamp");
   const signature = header(headers, "x-openfront-client-signature");
-  if (!/^[a-f0-9]{64}$/.test(identity) || !/^\d{10}$/.test(timestamp30) || !/^[a-f0-9]{64}$/.test(signature)) return null;
-  const age = Math.abs(now - Number(timestamp30) * 1e3);
+  if (!/^[a-f0-9]{64}$/.test(identity) || !/^\d{10}$/.test(timestamp32) || !/^[a-f0-9]{64}$/.test(signature)) return null;
+  const age = Math.abs(now - Number(timestamp32) * 1e3);
   if (!Number.isFinite(age) || age > INTERNAL_IDENTITY_MAX_AGE_MS) return null;
-  const expected = (0, import_node_crypto4.createHmac)("sha256", secret).update(`${timestamp30}:${identity}`).digest("hex");
+  const expected = (0, import_node_crypto4.createHmac)("sha256", secret).update(`${timestamp32}:${identity}`).digest("hex");
   return safeEqual(signature, expected) ? `forwarded:${identity}` : null;
 }
 function railwayEdgeSource(headers, socketAddress) {
@@ -2126,10 +2126,10 @@ function snapshotMembershipAgreement(tier, billingCycle, currencyCode, options =
 }
 function acceptedProviderPrice(agreement, fallbacks) {
   const amount = Number.isSafeInteger(agreement?.amount) ? agreement.amount : null;
-  const text42 = (value) => typeof value === "string" && value ? value : null;
-  if (text42(agreement?.providerPriceId)) return { priceId: agreement.providerPriceId, productId: text42(agreement.providerProductId), amount, basis: "agreement" };
-  if (text42(fallbacks.checkoutPriceId)) return { priceId: fallbacks.checkoutPriceId, productId: text42(fallbacks.checkoutProductId), amount, basis: "checkout" };
-  if (text42(fallbacks.tierPriceId)) return { priceId: fallbacks.tierPriceId, productId: null, amount, basis: "catalog" };
+  const text44 = (value) => typeof value === "string" && value ? value : null;
+  if (text44(agreement?.providerPriceId)) return { priceId: agreement.providerPriceId, productId: text44(agreement.providerProductId), amount, basis: "agreement" };
+  if (text44(fallbacks.checkoutPriceId)) return { priceId: fallbacks.checkoutPriceId, productId: text44(fallbacks.checkoutProductId), amount, basis: "checkout" };
+  if (text44(fallbacks.tierPriceId)) return { priceId: fallbacks.tierPriceId, productId: null, amount, basis: "catalog" };
   return null;
 }
 function periodInterval(billingCycle, billingPeriod) {
@@ -2947,11 +2947,11 @@ function range(open, close) {
 function parseDayHours(value) {
   try {
     if (typeof value === "string") {
-      const text42 = value.trim().toLowerCase();
-      if (!text42) return null;
-      if (text42 === "closed") return "closed";
-      if (text42 === "24/7" || text42 === "24 hours" || text42 === "open 24 hours") return "all";
-      return text42.split(/\s*[,;]\s*/).filter(Boolean).map((part) => {
+      const text44 = value.trim().toLowerCase();
+      if (!text44) return null;
+      if (text44 === "closed") return "closed";
+      if (text44 === "24/7" || text44 === "24 hours" || text44 === "open 24 hours") return "all";
+      return text44.split(/\s*[,;]\s*/).filter(Boolean).map((part) => {
         const [open, close, extra] = part.split(/\s*[-–—]\s*/);
         if (!open || !close || extra !== void 0) throw new Error("Hours need one opening and closing time");
         return range(open, close);
@@ -3138,7 +3138,7 @@ async function currentRoleActor(context) {
   if (!session?.itemId || !organizationId) throw new Error("Organization session required");
   const user = await context.query.User.findOne({
     where: { id: session.itemId },
-    query: "id organization { id } role { id canManageAllRecords canManagePeople canManageCheckIns canManageFacilities isInstructor organization { id } }"
+    query: "id organization { id } role { id canManageAllRecords canManagePeople canManageCheckIns canManageFacilities canManagePayroll isInstructor organization { id } }"
   });
   if (!user || user.organization?.id !== organizationId || user.role && user.role.organization?.id !== organizationId) {
     throw new Error("Actor organization mismatch");
@@ -3151,6 +3151,7 @@ async function currentRoleActor(context) {
     canManagePeople: Boolean(role?.canManagePeople),
     canManageCheckIns: Boolean(role?.canManageCheckIns),
     canManageFacilities: Boolean(role?.canManageFacilities),
+    canManagePayroll: Boolean(role?.canManagePayroll),
     isInstructor: Boolean(role?.isInstructor)
   };
 }
@@ -3249,8 +3250,8 @@ function documentToPlainText(value) {
   if (typeof value === "string") return value.trim() || null;
   if (typeof value !== "object") return null;
   const document4 = value.document;
-  const text42 = document4?.flatMap((node) => node.children ?? []).map((child) => typeof child.text === "string" ? child.text : "").join(" ").replace(/\s+/g, " ").trim();
-  return text42 || null;
+  const text44 = document4?.flatMap((node) => node.children ?? []).map((child) => typeof child.text === "string" ? child.text : "").join(" ").replace(/\s+/g, " ").trim();
+  return text44 || null;
 }
 function normalizePublicLimit(value) {
   if (!Number.isFinite(value)) return DEFAULT_LIST_LIMIT;
@@ -3293,8 +3294,8 @@ function normalizePublicMediaPath(value) {
 }
 function publicText(value, limit) {
   if (typeof value !== "string") return null;
-  const text42 = value.trim();
-  return text42 ? text42.slice(0, limit) : null;
+  const text44 = value.trim();
+  return text44 ? text44.slice(0, limit) : null;
 }
 function publicInternalHref(value) {
   return publicCtaHref(value);
@@ -3320,8 +3321,8 @@ function publicContactTopics(value) {
     if (!item || typeof item !== "object") return [];
     const title = publicText(item.title, 100);
     const details = Array.isArray(item.details) ? item.details.slice(0, 12).flatMap((detail) => {
-      const text42 = publicText(detail, 300);
-      return text42 ? [text42] : [];
+      const text44 = publicText(detail, 300);
+      return text44 ? [text44] : [];
     }) : [];
     return title && details.length ? [{ title, details }] : [];
   });
@@ -3333,8 +3334,8 @@ function publicFacilityHighlights(value) {
     const title = publicText(item.title, 200);
     const description = publicText(item.description, 1e3);
     const features = Array.isArray(item.features) ? item.features.slice(0, 20).flatMap((feature) => {
-      const text42 = publicText(feature, 100);
-      return text42 ? [text42] : [];
+      const text44 = publicText(feature, 100);
+      return text44 ? [text44] : [];
     }) : [];
     return title && description ? [{ title, description, features }] : [];
   });
@@ -3630,14 +3631,14 @@ async function getPublicStudioClassInstances(root, args, context) {
     { AND: [{ location: null }, { classSchedule: { location: { id: { equals: args.locationId } } } }] }
   ] });
   for (const term of String(args.search || "").trim().toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6)) {
-    const text42 = containsText(term.slice(0, 60));
+    const text44 = containsText(term.slice(0, 60));
     const levels = CLASS_LEVELS.filter((level) => level.startsWith(term));
     filters.push({ OR: [
-      { classSchedule: { name: text42 } },
-      { classSchedule: { classType: { name: text42 } } },
+      { classSchedule: { name: text44 } },
+      { classSchedule: { classType: { name: text44 } } },
       ...levels.length ? [{ classSchedule: { classType: { difficulty: { in: levels } } } }] : [],
-      { instructor: { user: { name: text42 } } },
-      { AND: [{ instructor: null }, { classSchedule: { instructor: { user: { name: text42 } } } }] }
+      { instructor: { user: { name: text44 } } },
+      { AND: [{ instructor: null }, { classSchedule: { instructor: { user: { name: text44 } } } }] }
     ] });
   }
   const records = await publicContext(context).query.ClassInstance.findMany({
@@ -3795,6 +3796,88 @@ var init_publicStudio = __esm({
   }
 });
 
+// features/keystone/lib/fees.ts
+async function classPolicy(txIn, organizationId, classType) {
+  const tx = guardKeystonePrismaResults(txIn);
+  const settings = await tx.studioSettings.findFirst({ where: { organizationId }, orderBy: [{ createdAt: "asc" }], select: { lateCancelHours: true, lateCancelFee: true, noShowFee: true, lateCancelWaiversPer30Days: true, currencyCode: true } });
+  const pick = (override, fallback, def) => Number.isInteger(override) ? override : Number.isInteger(fallback) ? fallback : def;
+  return {
+    windowHours: Math.min(pick(classType?.cancelWindowHoursOverride, settings?.lateCancelHours, 12), 72),
+    lateCancelFee: pick(classType?.lateCancelFeeOverride, settings?.lateCancelFee, 1500),
+    noShowFee: pick(classType?.noShowFeeOverride, settings?.noShowFee, 2e3),
+    waiversPer30Days: pick(null, settings?.lateCancelWaiversPer30Days, 1),
+    currencyCode: String(settings?.currencyCode || "USD").toUpperCase()
+  };
+}
+async function bookingFunding(txIn, booking) {
+  const tx = guardKeystonePrismaResults(txIn);
+  if (booking?.serviceSnapshot?.credit?.basis === "drop_in_paid") return "drop_in";
+  const debit = await tx.creditEntry.findFirst({ where: { organizationId: booking.organizationId, eventKey: `${booking.id}:debit` }, include: { grant: { select: { quantity: true } } } });
+  if (!debit) return "none";
+  return debit.grant?.quantity === -1 ? "unlimited" : "credit";
+}
+async function waiverAllowanceLeft(txIn, organizationId, memberId, policy, at) {
+  const tx = guardKeystonePrismaResults(txIn);
+  if (policy.waiversPer30Days <= 0) return 0;
+  const since = new Date(at.getTime() - 30 * 864e5);
+  const used = await tx.fee.count({ where: { organizationId, memberId, kind: "late_cancel", createdAt: { gte: since }, status: { not: "void" } } });
+  return Math.max(policy.waiversPer30Days - used, 0);
+}
+async function quoteBookingCancellation(txIn, booking, now = /* @__PURE__ */ new Date(), actorIsStaff = false) {
+  const tx = guardKeystonePrismaResults(txIn);
+  const instance = booking.classInstance;
+  const classType = instance?.classSchedule?.classType ?? null;
+  const policy = await classPolicy(tx, booking.organizationId, classType);
+  const money2 = (cents2) => `${policy.currencyCode === "USD" ? "$" : ""}${(cents2 / 100).toFixed(2)}${policy.currencyCode === "USD" ? "" : ` ${policy.currencyCode}`}`;
+  if (booking.status === "waitlisted") return { late: false, windowHours: policy.windowHours, consequence: "waitlist_free", feeAmount: 0, currencyCode: policy.currencyCode, message: "Leaving the waitlist is free." };
+  const start = new Date(instance.date);
+  const late = !actorIsStaff && policy.windowHours > 0 && start.getTime() - now.getTime() < policy.windowHours * 36e5;
+  if (!late) return { late: false, windowHours: policy.windowHours, consequence: "free", feeAmount: 0, currencyCode: policy.currencyCode, message: "Free to cancel: your credit or payment comes back." };
+  const funding = await bookingFunding(tx, booking);
+  if (funding === "drop_in") return { late: true, windowHours: policy.windowHours, consequence: "drop_in_kept", feeAmount: 0, currencyCode: policy.currencyCode, message: `Inside ${policy.windowHours} hours of class: your drop-in payment isn't refunded.` };
+  if (funding === "unlimited") {
+    const left = await waiverAllowanceLeft(tx, booking.organizationId, booking.memberId, policy, now);
+    if (left > 0 || policy.lateCancelFee === 0) return { late: true, windowHours: policy.windowHours, consequence: "fee_waived", feeAmount: 0, currencyCode: policy.currencyCode, message: `Inside ${policy.windowHours} hours of class. Your first late cancel in 30 days is free; the next costs ${money2(policy.lateCancelFee)}.` };
+    return { late: true, windowHours: policy.windowHours, consequence: "fee", feeAmount: policy.lateCancelFee, currencyCode: policy.currencyCode, message: `Inside ${policy.windowHours} hours of class: a ${money2(policy.lateCancelFee)} late-cancel fee is charged to your saved card.` };
+  }
+  return { late: true, windowHours: policy.windowHours, consequence: "credit_kept", feeAmount: 0, currencyCode: policy.currencyCode, message: `Inside ${policy.windowHours} hours of class: the class credit isn't returned.` };
+}
+async function assessFee(txIn, input) {
+  const tx = guardKeystonePrismaResults(txIn);
+  const feeKey = `${input.kind}:${input.bookingId ?? input.appointmentId}`;
+  const existing = await tx.fee.findFirst({ where: { organizationId: input.organizationId, feeKey } });
+  if (existing) {
+    if (existing.status !== "void") return existing;
+    return tx.fee.update({ where: { id: existing.id }, data: { status: input.waivedBasis ? "waived" : "assessed", amount: input.amount, waivedBasis: input.waivedBasis ?? "", history: [...existing.history ?? [], { action: "reassessed", at: (/* @__PURE__ */ new Date()).toISOString() }] } });
+  }
+  return tx.fee.create({ data: {
+    organizationId: input.organizationId,
+    memberId: input.memberId,
+    bookingId: input.bookingId ?? null,
+    appointmentId: input.appointmentId ?? null,
+    feeKey,
+    kind: input.kind,
+    amount: input.amount,
+    currencyCode: input.currencyCode,
+    status: input.waivedBasis ? "waived" : input.amount > 0 ? "assessed" : "waived",
+    waivedBasis: input.waivedBasis ?? (input.amount > 0 ? "" : "zero"),
+    waivedReason: input.waivedBasis === "allowance" ? "First late cancel in 30 days" : "",
+    history: [{ action: "assessed", at: (/* @__PURE__ */ new Date()).toISOString(), note: input.note ?? "" }]
+  } });
+}
+async function voidFeesForBooking(txIn, organizationId, bookingId, note) {
+  const tx = guardKeystonePrismaResults(txIn);
+  const fees = await tx.fee.findMany({ where: { organizationId, bookingId, status: { in: ["assessed", "owed", "waived"] } } });
+  for (const fee of fees) await tx.fee.update({ where: { id: fee.id }, data: { status: "void", history: [...fee.history ?? [], { action: "void", at: (/* @__PURE__ */ new Date()).toISOString(), note }] } });
+  return fees.length;
+}
+var init_fees = __esm({
+  "features/keystone/lib/fees.ts"() {
+    "use strict";
+    init_prisma_result();
+  }
+});
+
 // features/keystone/mutations/studioLifecycle.ts
 function assertFacilityStaff(actor2) {
   if (actor2.canManageAllRecords || actor2.canManageCheckIns || actor2.canManageFacilities || actor2.trustedKiosk) return;
@@ -3808,14 +3891,6 @@ function assertActorOrganization(actor2, organizationId) {
 function assertOwnerOrOperator(actor2, ownerUserId) {
   if (actor2.canManageAllRecords || actor2.trustedKiosk || actor2.userId === ownerUserId) return;
   throw new Error("You cannot manage another member's records");
-}
-async function lateCancelWindowHours(tx, organizationId) {
-  const settings = await tx.studioSettings.findFirst({ where: { organizationId }, orderBy: [{ createdAt: "asc" }], select: { lateCancelHours: true } });
-  const hours = Number(settings?.lateCancelHours ?? 0);
-  return Number.isInteger(hours) && hours > 0 ? Math.min(hours, 72) : 0;
-}
-function isLateCancellation(classStart, now, windowHours) {
-  return windowHours > 0 && classStart.getTime() - now.getTime() < windowHours * 36e5;
 }
 async function cancelCapacityControlledBooking(prisma, input) {
   prisma = guardKeystonePrismaResults(prisma);
@@ -3837,7 +3912,7 @@ async function cancelCapacityControlledBooking(prisma, input) {
     const booking = await transaction.classBooking.findFirst({
       where: { id: input.bookingId, organizationId: input.actor.organizationId },
       include: {
-        classInstance: { select: { id: true, date: true, organizationId: true, isCancelled: true } },
+        classInstance: { select: { id: true, date: true, organizationId: true, isCancelled: true, classSchedule: { select: { classType: { select: { cancelWindowHoursOverride: true, lateCancelFeeOverride: true, noShowFeeOverride: true } } } } } },
         member: {
           include: {
             user: {
@@ -3878,7 +3953,8 @@ async function cancelCapacityControlledBooking(prisma, input) {
     } else if (booking.classInstance.date.getTime() <= Date.now()) {
       throw new Error("A class booking cannot be cancelled after the class starts");
     }
-    const late = !past && booking.status === "confirmed" && !input.actor.canManageAllRecords && isLateCancellation(booking.classInstance.date, /* @__PURE__ */ new Date(), await lateCancelWindowHours(transaction, input.actor.organizationId));
+    const quote = past ? null : await quoteBookingCancellation(transaction, booking, /* @__PURE__ */ new Date(), input.actor.canManageAllRecords && !input.applyPolicy);
+    const late = Boolean(quote?.late) && booking.status === "confirmed";
     await transaction.classBooking.update({
       where: { id: booking.id },
       data: {
@@ -3892,6 +3968,12 @@ async function cancelCapacityControlledBooking(prisma, input) {
       }
     });
     if (booking.status === "confirmed" && !late && !isDropInBooking(booking)) await restoreBookingCredit(transaction, booking.id);
+    let feeId = null;
+    if (late && quote && (quote.consequence === "fee" || quote.consequence === "fee_waived")) {
+      const policy = await classPolicy(transaction, input.actor.organizationId, booking.classInstance.classSchedule?.classType ?? null);
+      const fee = await assessFee(transaction, { organizationId: input.actor.organizationId, memberId: booking.memberId, bookingId: booking.id, kind: "late_cancel", amount: policy.lateCancelFee, currencyCode: policy.currencyCode, waivedBasis: quote.consequence === "fee_waived" ? "allowance" : null });
+      feeId = fee.id;
+    }
     await enqueueOperationalNotice(transaction, {
       organizationId: input.actor.organizationId,
       memberId: booking.memberId,
@@ -3913,6 +3995,8 @@ async function cancelCapacityControlledBooking(prisma, input) {
       classInstanceId: booking.classInstance.id,
       cancelled: true,
       lateCancelled: late,
+      quote,
+      feeId,
       releasedConfirmedSpot,
       promotion
     };
@@ -4037,6 +4121,7 @@ async function loadStaffAttendanceBooking(transaction, bookingId, actor2) {
     throw new Error("Attendance can only be marked for a confirmed booking");
   }
   if (booking.classInstance.isCancelled) throw new Error("Attendance cannot be marked for a cancelled class");
+  if (booking.classInstance.closedAt) throw new Error("This class is closed. Reopen it to change attendance.");
   if (booking.classInstance.date.getTime() > Date.now()) {
     throw new Error("Attendance cannot be marked before the class starts");
   }
@@ -4250,6 +4335,7 @@ var init_studioLifecycle = __esm({
   "features/keystone/mutations/studioLifecycle.ts"() {
     "use strict";
     init_spots();
+    init_fees();
     init_trainerQualifications();
     init_membership_credits();
     init_operational_policy();
@@ -4712,6 +4798,37 @@ var init_stripe_adapter = __esm({
           throw error;
         }
       },
+      async chargeSavedPaymentMethod(input) {
+        const stripe = getStripeChargeClient();
+        let paymentMethod = input.paymentMethodId || null;
+        if (!paymentMethod) {
+          const customer = await stripe.customers.retrieve(input.customerId);
+          paymentMethod = customer?.invoice_settings?.default_payment_method || null;
+          if (!paymentMethod) {
+            const listed = await stripe.paymentMethods.list({ customer: input.customerId, type: "card", limit: 1 });
+            paymentMethod = listed.data[0]?.id || null;
+          }
+        }
+        if (!paymentMethod) return { status: "failed", paymentIntentId: null, failureMessage: "No saved card" };
+        try {
+          const intent = await stripe.paymentIntents.create({
+            amount: input.amount,
+            currency: input.currencyCode.toLowerCase(),
+            customer: input.customerId,
+            payment_method: paymentMethod,
+            off_session: true,
+            confirm: true,
+            description: input.description,
+            metadata: input.metadata
+          }, { idempotencyKey: input.idempotencyKey });
+          return { status: intent.status === "succeeded" ? "succeeded" : intent.status === "processing" ? "pending" : "failed", paymentIntentId: intent.id, failureMessage: intent.last_payment_error?.message ?? null };
+        } catch (error) {
+          if (error?.type === "StripeCardError" || error?.code === "authentication_required" || error?.code === "card_declined") {
+            return { status: "failed", paymentIntentId: error?.payment_intent?.id ?? error?.raw?.payment_intent?.id ?? null, failureMessage: error?.message ?? "Card declined" };
+          }
+          throw error;
+        }
+      },
       async createSetupIntent(customerId) {
         const intent = await getStripeChargeClient().setupIntents.create({
           customer: customerId,
@@ -4719,10 +4836,10 @@ var init_stripe_adapter = __esm({
         });
         return { id: intent.id, clientSecret: intent.client_secret };
       },
-      cancelSubscriptionAtPeriodEnd(subscriptionId, idempotencyKey) {
+      cancelSubscriptionAtPeriodEnd(subscriptionId, idempotencyKey, cancelAt) {
         return getStripeClient().subscriptions.update(
           subscriptionId,
-          { cancel_at_period_end: true },
+          cancelAt ? { cancel_at: Math.floor(cancelAt.getTime() / 1e3), proration_behavior: "none" } : { cancel_at_period_end: true },
           idempotencyKey ? { idempotencyKey } : void 0
         );
       },
@@ -4810,6 +4927,314 @@ var init_stripe_adapter = __esm({
   }
 });
 
+// features/integrations/payment/index.ts
+async function getPaymentProviderAdapter(adapterKey) {
+  const loadAdapter = paymentProviderAdapters[adapterKey];
+  if (!loadAdapter) throw new Error(`Unsupported payment provider adapter: ${adapterKey}`);
+  const loadedAdapter = await loadAdapter();
+  return loadedAdapter.stripePaymentProviderAdapter;
+}
+async function getPaymentProviderAdapterForExecution(adapterKey) {
+  return getPaymentProviderAdapter(adapterKey);
+}
+var paymentProviderAdapters;
+var init_payment = __esm({
+  "features/integrations/payment/index.ts"() {
+    "use strict";
+    paymentProviderAdapters = {
+      stripe: () => Promise.resolve().then(() => (init_stripe_adapter(), stripe_adapter_exports))
+    };
+  }
+});
+
+// features/keystone/utils/paymentProviderAdapter.ts
+async function getPaymentProvider(context, providerCode, organizationId, purpose = "charge") {
+  if (!organizationId) throw new Error("Payment provider organization is required.");
+  const providers = await context.sudo().query.PaymentProvider.findMany({
+    where: {
+      AND: [
+        { code: { equals: providerCode } },
+        purpose === "charge" ? installedPaymentProviderWhere() : reconciliationPaymentProviderWhere(),
+        { organization: { id: { equals: organizationId } } }
+      ]
+    },
+    take: 1,
+    query: PROVIDER_QUERY
+  });
+  const provider = providers[0];
+  if (!provider) throw new Error(`Payment provider ${providerCode} is not installed.`);
+  if (purpose === "charge" && provider.adapterKey === "stripe" && !newPaymentChargesEnabled()) {
+    throw new Error("Card payments are turned off for this Studio deployment.");
+  }
+  return provider;
+}
+async function getAdapterForProvider(context, providerCode, organizationId, purpose = "charge") {
+  const provider = await getPaymentProvider(context, providerCode, organizationId, purpose);
+  const adapter = await getPaymentProviderAdapterForExecution(provider.adapterKey);
+  return { provider, adapter };
+}
+var PROVIDER_QUERY;
+var init_paymentProviderAdapter = __esm({
+  "features/keystone/utils/paymentProviderAdapter.ts"() {
+    "use strict";
+    init_stripe_environment_provider();
+    init_payment();
+    PROVIDER_QUERY = "id code adapterKey providerAccountId isInstalled organization { id }";
+  }
+});
+
+// features/keystone/mutations/fees.ts
+var fees_exports = {};
+__export(fees_exports, {
+  chargeAssessedFee: () => chargeAssessedFee,
+  closeClass: () => closeClass,
+  feeTypeDefs: () => feeTypeDefs,
+  payFee: () => payFee,
+  quoteCancellation: () => quoteCancellation,
+  refundFee: () => refundFee,
+  registerClassPayLineHooks: () => registerClassPayLineHooks,
+  reopenClass: () => reopenClass,
+  waiveFee: () => waiveFee
+});
+function feeHistory(fee, action, extra = {}) {
+  return [...(fee.history ?? []).slice(-49), { action, at: (/* @__PURE__ */ new Date()).toISOString(), ...extra }];
+}
+async function chargeAssessedFee(context, feeId) {
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const fee = await prisma.fee.findUnique({ where: { id: feeId }, include: { member: { include: { user: { select: { id: true, stripeCustomerId: true } } } } } });
+  if (!fee || fee.status !== "assessed") return fee;
+  const customerId = fee.member?.user?.stripeCustomerId || "";
+  let outcome = { status: "failed", paymentIntentId: null, failureMessage: "No saved card" };
+  let providerId2 = null;
+  if (customerId) {
+    try {
+      const { adapter, provider } = await getAdapterForProvider(context, PROVIDER_CODE7, fee.organizationId, "charge");
+      providerId2 = provider.id;
+      if (adapter.chargeSavedPaymentMethod) {
+        outcome = await adapter.chargeSavedPaymentMethod({
+          customerId,
+          amount: fee.amount,
+          currencyCode: fee.currencyCode,
+          description: fee.kind === "no_show" ? "No-show fee" : "Late-cancel fee",
+          metadata: { source: "openfront-pilates-fee", organizationId: fee.organizationId, feeId: fee.id },
+          idempotencyKey: `fee-charge:${fee.id}`
+        });
+      }
+    } catch (error) {
+      outcome = { status: "failed", paymentIntentId: null, failureMessage: error instanceof Error ? error.message.slice(0, 300) : "Card payments are not set up" };
+    }
+  }
+  return withKeystonePrismaTransaction(context.prisma, async (tx) => {
+    await lockTransactionKey(tx, `fee:${fee.id}`);
+    const current = await tx.fee.findUnique({ where: { id: fee.id } });
+    if (current.status !== "assessed") return current;
+    if (outcome.status === "succeeded") {
+      const payment = await tx.payment.create({ data: {
+        organizationId: fee.organizationId,
+        memberId: fee.memberId,
+        paymentProviderId: providerId2,
+        amount: fee.amount,
+        currencyCode: fee.currencyCode,
+        status: "succeeded",
+        purpose: "fee",
+        method: "stripe",
+        paymentDate: /* @__PURE__ */ new Date(),
+        stripePaymentIntentId: outcome.paymentIntentId,
+        receiptNumber: `FEE-${fee.id.slice(-10)}`,
+        description: fee.kind === "no_show" ? "No-show fee" : "Late-cancel fee",
+        metadata: { feeId: fee.id }
+      } });
+      return tx.fee.update({ where: { id: fee.id }, data: { status: "charged", paymentId: payment.id, providerPaymentIntentId: outcome.paymentIntentId ?? "", history: feeHistory(current, "charged") } });
+    }
+    if (outcome.status === "pending") return tx.fee.update({ where: { id: fee.id }, data: { providerPaymentIntentId: outcome.paymentIntentId ?? "", history: feeHistory(current, "charge_pending") } });
+    return tx.fee.update({ where: { id: fee.id }, data: { status: "owed", providerPaymentIntentId: outcome.paymentIntentId ?? "", failureMessage: (outcome.failureMessage ?? "").slice(0, 500), history: feeHistory(current, "owed", { reason: outcome.failureMessage ?? "" }) } });
+  });
+}
+async function quoteCancellation(_root, { bookingId }, context) {
+  const actor2 = await currentRoleActor(context);
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const booking = await prisma.classBooking.findFirst({ where: { id: bookingId, organizationId: actor2.organizationId }, include: { member: { select: { userId: true } }, classInstance: { include: { classSchedule: { include: { classType: true } } } } } });
+  if (!booking) throw new Error("Booking not found");
+  if (booking.member?.userId !== actor2.userId && !actor2.canManageAllRecords && !actor2.canManageCheckIns) throw new Error("Booking not found");
+  return quoteBookingCancellation(prisma, booking, /* @__PURE__ */ new Date(), false);
+}
+async function feeForActor(context, feeId, staffOnly) {
+  const actor2 = await currentRoleActor(context);
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const fee = await prisma.fee.findFirst({ where: { id: feeId, organizationId: actor2.organizationId }, include: { member: { select: { userId: true } } } });
+  if (!fee) throw new Error("Fee not found");
+  const own = fee.member?.userId === actor2.userId;
+  if (staffOnly ? !actor2.canManageAllRecords && !actor2.canManageCheckIns : !own && !actor2.canManageAllRecords && !actor2.canManageCheckIns) throw new Error("Fee not found");
+  return { actor: actor2, prisma, fee };
+}
+async function payFee(_root, args, context) {
+  const { actor: actor2, fee } = await feeForActor(context, args.feeId, false);
+  if (!["owed", "assessed"].includes(fee.status)) {
+    if (fee.status === "charged") return fee;
+    throw new Error(`This fee is ${fee.status}`);
+  }
+  const method = String(args.method || "stripe");
+  if (method !== "stripe") {
+    if (!actor2.canManageAllRecords && !actor2.canManageCheckIns) throw new Error("Only the front desk can record a desk payment");
+    if (!["terminal", "cash", "bank_transfer"].includes(method)) throw new Error("Desk payments are terminal, cash or bank transfer");
+    return withKeystonePrismaTransaction(context.prisma, async (tx) => {
+      await lockTransactionKey(tx, `fee:${fee.id}`);
+      const current = await tx.fee.findUnique({ where: { id: fee.id } });
+      if (current.status === "charged") return current;
+      const payment = await tx.payment.create({ data: {
+        organizationId: fee.organizationId,
+        memberId: fee.memberId,
+        amount: fee.amount,
+        currencyCode: fee.currencyCode,
+        status: "succeeded",
+        purpose: "fee",
+        method,
+        recordedById: actor2.userId,
+        paymentDate: /* @__PURE__ */ new Date(),
+        receiptNumber: `FEE-${fee.id.slice(-10)}`,
+        description: fee.kind === "no_show" ? "No-show fee" : "Late-cancel fee",
+        metadata: { feeId: fee.id, reference: String(args.reference || "").slice(0, 200) }
+      } });
+      return tx.fee.update({ where: { id: fee.id }, data: { status: "charged", paymentId: payment.id, history: feeHistory(current, "paid_at_desk", { method, by: actor2.userId }) } });
+    });
+  }
+  await withKeystonePrismaTransaction(context.prisma, async (tx) => {
+    await lockTransactionKey(tx, `fee:${fee.id}`);
+    const current = await tx.fee.findUnique({ where: { id: fee.id } });
+    if (current.status === "owed") await tx.fee.update({ where: { id: fee.id }, data: { status: "assessed", history: feeHistory(current, "retry", { by: actor2.userId }) } });
+  });
+  const result = await chargeAssessedFee(context, fee.id);
+  if (result?.status !== "charged") throw new Error(result?.failureMessage ? `The card was not charged: ${result.failureMessage}. Update your card or pay at the front desk.` : "The card was not charged. Update your card or pay at the front desk.");
+  return result;
+}
+async function waiveFee(_root, args, context) {
+  const { actor: actor2, fee } = await feeForActor(context, args.feeId, true);
+  const reason = String(args.reason || "").trim();
+  if (reason.length < 3 || reason.length > 500) throw new Error("A reason is required to waive a fee");
+  if (!["assessed", "owed"].includes(fee.status)) throw new Error(fee.status === "charged" ? "This fee was charged; refund it instead" : `This fee is ${fee.status}`);
+  return withKeystonePrismaTransaction(context.prisma, async (tx) => {
+    await lockTransactionKey(tx, `fee:${fee.id}`);
+    const current = await tx.fee.findUnique({ where: { id: fee.id } });
+    if (!["assessed", "owed"].includes(current.status)) return current;
+    return tx.fee.update({ where: { id: fee.id }, data: { status: "waived", waivedById: actor2.userId, waivedReason: reason, waivedBasis: "staff", history: feeHistory(current, "waived", { by: actor2.userId, reason }) } });
+  });
+}
+async function refundFee(_root, args, context) {
+  const { actor: actor2, fee } = await feeForActor(context, args.feeId, true);
+  if (!actor2.canManageAllRecords) throw new Error("Refund permission required");
+  const reason = String(args.reason || "").trim();
+  if (reason.length < 3) throw new Error("A reason is required");
+  if (fee.status !== "charged") throw new Error(`This fee is ${fee.status}`);
+  const payment = fee.paymentId ? await guardKeystonePrismaResults(context.prisma).payment.findUnique({ where: { id: fee.paymentId } }) : null;
+  if (payment?.method === "stripe" && payment.stripePaymentIntentId) {
+    const { adapter } = await getAdapterForProvider(context, PROVIDER_CODE7, fee.organizationId, "reconcile");
+    await adapter.refundPayment(payment.stripePaymentIntentId, void 0, `fee-refund:${fee.id}`);
+  }
+  return withKeystonePrismaTransaction(context.prisma, async (tx) => {
+    await lockTransactionKey(tx, `fee:${fee.id}`);
+    const current = await tx.fee.findUnique({ where: { id: fee.id } });
+    if (current.status !== "charged") return current;
+    if (payment) await tx.payment.update({ where: { id: payment.id }, data: { status: "refunded", refundAmount: payment.amount, refundedAt: /* @__PURE__ */ new Date(), refundReason: reason } });
+    return tx.fee.update({ where: { id: fee.id }, data: { status: "refunded", refundedAt: /* @__PURE__ */ new Date(), history: feeHistory(current, "refunded", { by: actor2.userId, reason }) } });
+  });
+}
+function registerClassPayLineHooks(write, voidLine) {
+  writeClassPayLine = write;
+  voidClassPayLine = voidLine;
+}
+async function closeClass(_root, { classInstanceId }, context) {
+  const actor2 = await currentRoleActor(context);
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const instance = await prisma.classInstance.findFirst({ where: { id: classInstanceId, organizationId: actor2.organizationId }, include: { instructor: { include: { user: { select: { id: true } } } }, classSchedule: { include: { classType: true, instructor: { include: { user: { select: { id: true } } } } } } } });
+  if (!instance) throw new Error("Class not found");
+  const teacher = instance.instructor ?? instance.classSchedule?.instructor;
+  if (!actor2.canManageAllRecords && !actor2.canManageCheckIns && !(actor2.isInstructor && teacher?.user?.id === actor2.userId)) throw new Error("Only staff or the class's instructor can close it");
+  if (instance.isCancelled) throw new Error("This class was cancelled");
+  if (instance.date.getTime() > Date.now()) throw new Error("A class can be closed once it has started");
+  const result = await withKeystonePrismaTransaction(context.prisma, async (tx) => {
+    await lockTransactionKey(tx, `class-instance:${instance.id}`);
+    const current = await tx.classInstance.findUnique({ where: { id: instance.id } });
+    if (current.closedAt) return { alreadyClosed: true, attended: 0, noShows: 0, feeIds: [] };
+    const policy = await classPolicy(tx, actor2.organizationId, instance.classSchedule?.classType ?? null);
+    const bookings = await tx.classBooking.findMany({ where: { classInstanceId: instance.id, organizationId: actor2.organizationId, status: "confirmed" }, take: 1e3 });
+    const marks = await tx.attendanceRecord.findMany({ where: { organizationId: actor2.organizationId, bookingId: { in: bookings.map((b) => b.id) } }, select: { bookingId: true, attended: true } });
+    const attendedIds = new Set(marks.filter((m2) => m2.attended).map((m2) => m2.bookingId));
+    const feeIds = [];
+    let attended = 0, noShows = 0;
+    for (const booking of bookings) {
+      await lockTransactionKey(tx, `member:${booking.memberId}`);
+      const wasThere = attendedIds.has(booking.id) || Boolean(booking.checkedInAt);
+      await tx.classBooking.update({ where: { id: booking.id }, data: { status: wasThere ? "attended" : "no_show", history: appendHistory(booking.history, historyEntry(wasThere ? "attended" : "no_show", { by: actor2.userId, closed: true })) } });
+      if (wasThere) {
+        attended += 1;
+        continue;
+      }
+      noShows += 1;
+      if (await bookingFunding(tx, booking) === "unlimited" && policy.noShowFee > 0) {
+        const fee = await assessFee(tx, { organizationId: actor2.organizationId, memberId: booking.memberId, bookingId: booking.id, kind: "no_show", amount: policy.noShowFee, currencyCode: policy.currencyCode });
+        if (fee.status === "assessed") feeIds.push(fee.id);
+      }
+    }
+    await tx.classInstance.update({ where: { id: instance.id }, data: { closedAt: /* @__PURE__ */ new Date(), closedById: actor2.userId } });
+    if (writeClassPayLine) await writeClassPayLine(tx, { organizationId: actor2.organizationId, classInstanceId: instance.id, actorId: actor2.userId });
+    return { alreadyClosed: false, attended, noShows, feeIds };
+  });
+  for (const feeId of result.feeIds) await chargeAssessedFee(context, feeId);
+  return { classInstanceId: instance.id, ...result };
+}
+async function reopenClass(_root, { classInstanceId }, context) {
+  const actor2 = await currentRoleActor(context);
+  if (!actor2.canManageAllRecords && !actor2.canManageCheckIns) throw new Error("Only staff can reopen a class");
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const instance = await prisma.classInstance.findFirst({ where: { id: classInstanceId, organizationId: actor2.organizationId } });
+  if (!instance) throw new Error("Class not found");
+  const chargedFees = await prisma.fee.findMany({ where: { organizationId: actor2.organizationId, kind: "no_show", status: "charged", booking: { classInstanceId: instance.id } }, select: { id: true } });
+  const out = await withKeystonePrismaTransaction(context.prisma, async (tx) => {
+    await lockTransactionKey(tx, `class-instance:${instance.id}`);
+    const current = await tx.classInstance.findUnique({ where: { id: instance.id } });
+    if (!current.closedAt) return { reopened: false };
+    const locked = await tx.payLine?.findFirst?.({ where: { organizationId: actor2.organizationId, classInstanceId: instance.id, status: { in: ["locked", "paid"] } }, select: { id: true } });
+    if (locked) throw new Error("This class's pay line is in a locked payroll run; it can no longer be reopened");
+    const bookings = await tx.classBooking.findMany({ where: { classInstanceId: instance.id, organizationId: actor2.organizationId, status: { in: ["attended", "no_show"] } }, take: 1e3 });
+    for (const booking of bookings) {
+      await tx.classBooking.update({ where: { id: booking.id }, data: { status: "confirmed", history: appendHistory(booking.history, historyEntry("reopened", { by: actor2.userId, from: booking.status })) } });
+      await voidFeesForBooking(tx, actor2.organizationId, booking.id, "Class reopened");
+    }
+    await tx.classInstance.update({ where: { id: instance.id }, data: { closedAt: null, closedById: null } });
+    if (voidClassPayLine) await voidClassPayLine(tx, { organizationId: actor2.organizationId, classInstanceId: instance.id, actorId: actor2.userId });
+    return { reopened: true, bookings: bookings.length };
+  });
+  for (const fee of chargedFees) await refundFee(null, { feeId: fee.id, reason: "Class reopened" }, context).catch(() => void 0);
+  return out;
+}
+var PROVIDER_CODE7, writeClassPayLine, voidClassPayLine, feeTypeDefs;
+var init_fees2 = __esm({
+  "features/keystone/mutations/fees.ts"() {
+    "use strict";
+    init_currentRoleActor();
+    init_prisma_result();
+    init_fees();
+    init_spots();
+    init_paymentProviderAdapter();
+    init_classCapacity();
+    PROVIDER_CODE7 = "pp_stripe";
+    writeClassPayLine = null;
+    voidClassPayLine = null;
+    feeTypeDefs = `
+  extend type Query {
+    quoteCancellation(bookingId: ID!): JSON!
+  }
+  extend type Mutation {
+    payFee(feeId: ID!, method: String, reference: String): JSON!
+    waiveFee(feeId: ID!, reason: String!): JSON!
+    refundFee(feeId: ID!, reason: String!): JSON!
+    closeClass(classInstanceId: ID!): JSON!
+    reopenClass(classInstanceId: ID!): JSON!
+  }
+`;
+  }
+});
+
 // keystone.ts
 var keystone_exports = {};
 __export(keystone_exports, {
@@ -4829,7 +5254,7 @@ function s3ForcePathStyle(endpoint2) {
 
 // features/keystone/index.ts
 var import_auth2 = require("@keystone-6/auth");
-var import_core41 = require("@keystone-6/core");
+var import_core43 = require("@keystone-6/core");
 var import_config = require("dotenv/config");
 
 // features/keystone/models/Organization.ts
@@ -5394,7 +5819,7 @@ var Role = (0, import_core3.list)({
     canManagePrograms: (0, import_fields4.checkbox)({ defaultValue: false, label: "User can assign and review teaching work for any member" }),
     canManageCommunications: (0, import_fields4.checkbox)({ defaultValue: false, label: "User can read and answer storefront contact messages" }),
     canManageRetail: (0, import_fields4.checkbox)({ defaultValue: false, label: "User can record retail sales, returns, stock and cash drawer closes" }),
-    canManagePayroll: (0, import_fields4.checkbox)({ defaultValue: false, label: "Reserved: Studio has no payroll features; grants no access", ui: { createView: { fieldMode: "hidden" }, itemView: { fieldMode: "hidden" }, listView: { fieldMode: "hidden" } } }),
+    canManagePayroll: (0, import_fields4.checkbox)({ defaultValue: false, label: "Manage instructor pay rates, pay lines and payroll runs" }),
     canViewReports: (0, import_fields4.checkbox)({ defaultValue: false, label: "User can view reports" }),
     isInstructor: (0, import_fields4.checkbox)({ defaultValue: false, label: "User is a instructor: sees their own rosters, appointments and teaching members" }),
     assignedTo: (0, import_fields4.relationship)({
@@ -6752,7 +7177,9 @@ var Payment = (0, import_core9.list)({
         { label: "Pending", value: "pending" },
         { label: "Succeeded", value: "succeeded" },
         { label: "Failed", value: "failed" },
-        { label: "Refunded", value: "refunded" }
+        { label: "Partially refunded", value: "partially_refunded" },
+        { label: "Refunded", value: "refunded" },
+        { label: "Expired", value: "expired" }
       ],
       defaultValue: "pending",
       validation: { isRequired: true },
@@ -6760,6 +7187,20 @@ var Payment = (0, import_core9.list)({
         description: "Payment status"
       }
     }),
+    // Dissertation 4.5: one payment has one purpose and one method.
+    purpose: (0, import_fields10.select)({
+      type: "string",
+      options: ["drop_in", "pack", "membership", "appointment", "fee", "gift_card", "retail"].map((value) => ({ label: value, value })),
+      db: { isNullable: true },
+      access: { create: import_access17.denyAll, update: import_access17.denyAll }
+    }),
+    method: (0, import_fields10.select)({
+      type: "string",
+      options: ["stripe", "terminal", "cash", "bank_transfer", "gift_card"].map((value) => ({ label: value, value })),
+      defaultValue: "stripe",
+      access: { create: import_access17.denyAll, update: import_access17.denyAll }
+    }),
+    recordedBy: (0, import_fields10.relationship)({ ref: "User", access: { create: import_access17.denyAll, update: import_access17.denyAll } }),
     paymentDate: (0, import_fields10.timestamp)({
       defaultValue: { kind: "now" },
       validation: { isRequired: true },
@@ -8316,6 +8757,7 @@ var ClassBooking = (0, import_core20.list)({
       access: { update: import_access39.denyAll },
       ui: { description: "The member cancelled inside the club's late-cancel window; the class credit was not returned" }
     }),
+    checkedInAt: (0, import_fields22.timestamp)({ access: { create: import_access39.denyAll, update: import_access39.denyAll } }),
     cancelledAt: (0, import_fields22.timestamp)({
       access: { update: import_access39.denyAll },
       ui: {
@@ -8446,10 +8888,10 @@ function normalizeStudioSettingsInput(input) {
     }
   }
   if ("dropInPrice" in input && input.dropInPrice != null) {
-    const cents = Number(input.dropInPrice);
-    if (!Number.isInteger(cents) || cents < 0 || cents > 1e5) throw new Error("Drop-in price must be between $0 and $1,000");
-    if (cents > 0 && cents < 50) throw new Error("Drop-in price must be at least $0.50, or $0 to stop selling drop-ins online");
-    output.dropInPrice = cents;
+    const cents2 = Number(input.dropInPrice);
+    if (!Number.isInteger(cents2) || cents2 < 0 || cents2 > 1e5) throw new Error("Drop-in price must be between $0 and $1,000");
+    if (cents2 > 0 && cents2 < 50) throw new Error("Drop-in price must be at least $0.50, or $0 to stop selling drop-ins online");
+    output.dropInPrice = cents2;
   }
   if ("lateCancelHours" in input && input.lateCancelHours != null) {
     const hours = Number(input.lateCancelHours);
@@ -8545,12 +8987,12 @@ async function upsertStudioSettings(root, { data, expectedUpdatedAt }, context) 
   });
   return saved;
 }
-async function publishStudioParticipationTerms(_root, { text: text42, expectedPolicyId }, context) {
+async function publishStudioParticipationTerms(_root, { text: text44, expectedPolicyId }, context) {
   const session = context.session;
   const organizationId = getTenantId(session);
   if (!session?.itemId || !organizationId) throw new Error("Authentication required");
-  if (typeof text42 !== "string") throw new Error("Participation terms must be text");
-  const body = text42.trim();
+  if (typeof text44 !== "string") throw new Error("Participation terms must be text");
+  const body = text44.trim();
   if (body.length > PARTICIPATION_TERMS_MAX_LENGTH) throw new Error(`Participation terms must be ${PARTICIPATION_TERMS_MAX_LENGTH.toLocaleString("en-US")} characters or fewer`);
   return publishTermsForOrganization(context, organizationId, String(session.itemId), body, expectedPolicyId ?? null, { requirePolicyAuthority: true });
 }
@@ -8928,6 +9370,9 @@ var ClassInstance = (0, import_core22.list)({
         description: "Override max capacity (leave empty to use schedule default)"
       }
     }),
+    // Close class (W5.5): set by closeClass, cleared by reopenClass.
+    closedAt: (0, import_fields24.timestamp)({ access: { create: import_access43.denyAll, update: import_access43.denyAll } }),
+    closedBy: (0, import_fields24.relationship)({ ref: "User", access: { create: import_access43.denyAll, update: import_access43.denyAll } }),
     isCancelled: (0, import_fields24.checkbox)({
       access: { update: import_access43.denyAll },
       defaultValue: false,
@@ -9893,7 +10338,7 @@ var ClassPack = (0, import_core40.list)({
   }
 });
 var CreditGrant = (0, import_core40.list)({
-  db: { extendPrismaSchema: compoundUniqueDb("organizationId, sourceKey") },
+  db: { extendPrismaSchema: (schema) => compoundUniqueDb("organizationId, sourceKey")(schema).replace(/\n}$/, '\n  @@index([organizationId, memberId, kind, status, expiresAt], map: "CreditGrant_spend_idx")\n}') },
   access: { operation: { query: isSignedIn, create: import_access67.denyAll, update: import_access67.denyAll, delete: import_access67.denyAll }, filter: { query: ownOrStaff } },
   ui: { listView: { initialColumns: ["member", "source", "kind", "quantity", "remaining", "expiresAt", "status"] } },
   fields: {
@@ -9937,12 +10382,129 @@ var CreditEntry = (0, import_core40.list)({
   }
 });
 
+// features/keystone/models/Fee.ts
+var import_core41 = require("@keystone-6/core");
+var import_access69 = require("@keystone-6/core/access");
+var import_fields44 = require("@keystone-6/core/fields");
+init_access();
+init_tenantPolicy();
+init_trackingFields();
+init_tenantRelationships();
+var Fee = (0, import_core41.list)({
+  db: { extendPrismaSchema: compoundUniqueDb("organizationId, feeKey") },
+  access: {
+    operation: { query: isSignedIn, create: import_access69.denyAll, update: import_access69.denyAll, delete: import_access69.denyAll },
+    filter: { query: ({ session }) => tenantFilter({ session }, canManageTenant({ session }, "canManageAllRecords") || session?.data?.role?.canManageCheckIns ? void 0 : { member: { user: { id: { equals: session?.itemId } } } }) }
+  },
+  ui: { listView: { initialColumns: ["member", "kind", "amount", "status", "createdAt"] } },
+  fields: {
+    organization: (0, import_fields44.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
+    member: (0, import_fields44.relationship)({ ref: "Member", db: { extendPrismaSchema: requiredRelationshipDb("member") } }),
+    booking: (0, import_fields44.relationship)({ ref: "ClassBooking" }),
+    appointment: (0, import_fields44.relationship)({ ref: "Appointment" }),
+    /** One fee per booking and kind: `late_cancel:<bookingId>` or `no_show:<bookingId>`. */
+    feeKey: (0, import_fields44.text)({ validation: { isRequired: true } }),
+    kind: (0, import_fields44.select)({ type: "string", options: [{ label: "Late cancel", value: "late_cancel" }, { label: "No show", value: "no_show" }], validation: { isRequired: true } }),
+    amount: (0, import_fields44.integer)({ validation: { isRequired: true, min: 0 } }),
+    currencyCode: (0, import_fields44.text)({ defaultValue: "USD", validation: { isRequired: true } }),
+    status: (0, import_fields44.select)({ type: "string", options: ["assessed", "charged", "owed", "waived", "refunded", "void"].map((value) => ({ label: value, value })), defaultValue: "assessed", validation: { isRequired: true } }),
+    payment: (0, import_fields44.relationship)({ ref: "Payment" }),
+    providerPaymentIntentId: (0, import_fields44.text)(),
+    failureMessage: (0, import_fields44.text)(),
+    waivedBy: (0, import_fields44.relationship)({ ref: "User" }),
+    waivedReason: (0, import_fields44.text)(),
+    /** "allowance" when the waiver allowance waived it, "staff" when a person did. */
+    waivedBasis: (0, import_fields44.text)(),
+    refundedAt: (0, import_fields44.timestamp)(),
+    history: (0, import_fields44.json)({ defaultValue: [] }),
+    ...trackingFields
+  }
+});
+
+// features/keystone/models/Payroll.ts
+var import_core42 = require("@keystone-6/core");
+var import_access71 = require("@keystone-6/core/access");
+var import_fields45 = require("@keystone-6/core/fields");
+init_access();
+init_tenantPolicy();
+init_trackingFields();
+init_tenantRelationships();
+var payrollFilter = ({ session }) => tenantFilter({ session }, session?.data?.role?.canManagePayroll ? void 0 : { instructor: { user: { id: { equals: session?.itemId } } } });
+var PayRate = (0, import_core42.list)({
+  access: { operation: { query: isSignedIn, create: import_access71.denyAll, update: import_access71.denyAll, delete: import_access71.denyAll }, filter: { query: payrollFilter } },
+  ui: { listView: { initialColumns: ["instructor", "classBase", "perHeadBonus", "bonusAbove", "floor", "effectiveFrom"] } },
+  fields: {
+    organization: (0, import_fields45.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
+    instructor: (0, import_fields45.relationship)({ ref: "Instructor", db: { extendPrismaSchema: requiredRelationshipDb("instructor") } }),
+    classBase: (0, import_fields45.integer)({ defaultValue: 0, validation: { isRequired: true, min: 0 } }),
+    perHeadBonus: (0, import_fields45.integer)({ defaultValue: 0, validation: { isRequired: true, min: 0 } }),
+    bonusAbove: (0, import_fields45.integer)({ defaultValue: 0, validation: { isRequired: true, min: 0, max: 500 } }),
+    floor: (0, import_fields45.integer)({ defaultValue: 0, validation: { isRequired: true, min: 0 } }),
+    privateAmount: (0, import_fields45.integer)({ defaultValue: 0, validation: { isRequired: true, min: 0 } }),
+    duetAmount: (0, import_fields45.integer)({ defaultValue: 0, validation: { isRequired: true, min: 0 } }),
+    trioAmount: (0, import_fields45.integer)({ defaultValue: 0, validation: { isRequired: true, min: 0 } }),
+    hourlyAmount: (0, import_fields45.integer)({ defaultValue: 0, validation: { isRequired: true, min: 0 } }),
+    currencyCode: (0, import_fields45.text)({ defaultValue: "USD" }),
+    effectiveFrom: (0, import_fields45.timestamp)({ validation: { isRequired: true } }),
+    ...trackingFields
+  }
+});
+var PayLine = (0, import_core42.list)({
+  db: { extendPrismaSchema: compoundUniqueDb("organizationId, lineKey") },
+  access: { operation: { query: isSignedIn, create: import_access71.denyAll, update: import_access71.denyAll, delete: import_access71.denyAll }, filter: { query: payrollFilter } },
+  ui: { listView: { initialColumns: ["instructor", "kind", "workDate", "headcount", "amount", "status"] } },
+  fields: {
+    organization: (0, import_fields45.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
+    instructor: (0, import_fields45.relationship)({ ref: "Instructor", db: { extendPrismaSchema: requiredRelationshipDb("instructor") } }),
+    /** `class:<id>`, `appointment:<id>` or `manual:<key>`; a voided class line is re-accrued under the same key. */
+    lineKey: (0, import_fields45.text)({ validation: { isRequired: true } }),
+    kind: (0, import_fields45.select)({ type: "string", options: ["class", "appointment", "hourly", "adjustment"].map((value) => ({ label: value, value })), validation: { isRequired: true } }),
+    classInstance: (0, import_fields45.relationship)({ ref: "ClassInstance" }),
+    appointment: (0, import_fields45.relationship)({ ref: "Appointment" }),
+    workDate: (0, import_fields45.timestamp)({ validation: { isRequired: true } }),
+    headcount: (0, import_fields45.integer)({ defaultValue: 0 }),
+    hours: (0, import_fields45.integer)({ defaultValue: 0, ui: { description: "Minutes, for hourly lines" } }),
+    amount: (0, import_fields45.integer)({ validation: { isRequired: true } }),
+    currencyCode: (0, import_fields45.text)({ defaultValue: "USD" }),
+    rule: (0, import_fields45.text)({ ui: { description: "How the amount was computed" } }),
+    note: (0, import_fields45.text)(),
+    status: (0, import_fields45.select)({ type: "string", options: ["accrued", "locked", "paid", "void"].map((value) => ({ label: value, value })), defaultValue: "accrued", validation: { isRequired: true } }),
+    run: (0, import_fields45.relationship)({ ref: "PayrollRun.lines" }),
+    payRate: (0, import_fields45.relationship)({ ref: "PayRate" }),
+    createdBy: (0, import_fields45.relationship)({ ref: "User" }),
+    ...trackingFields
+  }
+});
+var PayrollRun = (0, import_core42.list)({
+  access: { operation: { query: isSignedIn, create: import_access71.denyAll, update: import_access71.denyAll, delete: import_access71.denyAll }, filter: { query: ({ session }) => tenantFilter({ session }, session?.data?.role?.canManagePayroll ? void 0 : { id: { equals: "__none__" } }) } },
+  ui: { listView: { initialColumns: ["periodStart", "periodEnd", "status", "total"] } },
+  fields: {
+    organization: (0, import_fields45.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
+    periodStart: (0, import_fields45.timestamp)({ validation: { isRequired: true } }),
+    periodEnd: (0, import_fields45.timestamp)({ validation: { isRequired: true } }),
+    status: (0, import_fields45.select)({ type: "string", options: ["draft", "locked", "paid"].map((value) => ({ label: value, value })), defaultValue: "draft", validation: { isRequired: true } }),
+    total: (0, import_fields45.integer)({ defaultValue: 0 }),
+    currencyCode: (0, import_fields45.text)({ defaultValue: "USD" }),
+    /** [{ instructorId, name, amount, method, reference, paidAt }] */
+    payouts: (0, import_fields45.json)({ defaultValue: [] }),
+    lines: (0, import_fields45.relationship)({ ref: "PayLine.run", many: true }),
+    lockedAt: (0, import_fields45.timestamp)(),
+    lockedBy: (0, import_fields45.relationship)({ ref: "User" }),
+    paidAt: (0, import_fields45.timestamp)(),
+    ...trackingFields
+  }
+});
+
 // features/keystone/models/index.ts
 var models = {
   Spot,
   ClassPack,
   CreditGrant,
   CreditEntry,
+  Fee,
+  PayRate,
+  PayLine,
+  PayrollRun,
   RetailItem,
   RetailSale,
   RetailReturn,
@@ -10162,14 +10724,14 @@ function qrSecret() {
   }
   return secret;
 }
-function generateQRSignature(memberId, organizationId, timestamp30) {
-  const data = `${organizationId}:${memberId}:${timestamp30}`;
+function generateQRSignature(memberId, organizationId, timestamp32) {
+  const data = `${organizationId}:${memberId}:${timestamp32}`;
   return import_crypto.default.createHmac("sha256", qrSecret()).update(data).digest("hex");
 }
 function createQRCodeData(memberId, organizationId) {
-  const timestamp30 = Date.now();
-  const signature = generateQRSignature(memberId, organizationId, timestamp30);
-  return { memberId, organizationId, timestamp: timestamp30, signature };
+  const timestamp32 = Date.now();
+  const signature = generateQRSignature(memberId, organizationId, timestamp32);
+  return { memberId, organizationId, timestamp: timestamp32, signature };
 }
 function encodeQRData(data) {
   return Buffer.from(JSON.stringify(data)).toString("base64url");
@@ -10818,18 +11380,18 @@ async function getRosterSessions(_root, args, context) {
   const from = localDayBound(args.from, timeZone, false) || new Date(now.getTime() - 24 * 60 * 60 * 1e3);
   const to = localDayBound(args.to, timeZone, true);
   if (to && to <= from) throw new Error("The end date must be on or after the start date");
-  const text42 = (path) => path({ contains: q, mode: "insensitive" });
+  const text44 = (path) => path({ contains: q, mode: "insensitive" });
   const base = [
     { organization: { id: { equals: actor2.organizationId } } },
     { date: { gte: from.toISOString() } },
     ...to ? [{ date: { lt: to.toISOString() } }] : [],
     ...actor2.instructorOnly ? [assignmentFilter(actor2.userId)] : [],
     ...q ? [{ OR: [
-      text42((match) => ({ classSchedule: { name: match } })),
-      text42((match) => ({ instructor: { user: { name: match } } })),
-      text42((match) => ({ AND: [{ instructor: null }, { classSchedule: { instructor: { user: { name: match } } } }] })),
-      text42((match) => ({ location: { name: match } })),
-      text42((match) => ({ AND: [{ location: null }, { classSchedule: { location: { name: match } } }] }))
+      text44((match) => ({ classSchedule: { name: match } })),
+      text44((match) => ({ instructor: { user: { name: match } } })),
+      text44((match) => ({ AND: [{ instructor: null }, { classSchedule: { instructor: { user: { name: match } } } }] })),
+      text44((match) => ({ location: { name: match } })),
+      text44((match) => ({ AND: [{ location: null }, { classSchedule: { location: { name: match } } }] }))
     ] }] : []
   ];
   const nowIso = now.toISOString();
@@ -11377,53 +11939,7 @@ async function promoteFromWaitlist(root, args, context) {
 
 // features/keystone/mutations/stripeSubscription.ts
 init_currentRoleActor();
-
-// features/keystone/utils/paymentProviderAdapter.ts
-init_stripe_environment_provider();
-
-// features/integrations/payment/index.ts
-var paymentProviderAdapters = {
-  stripe: () => Promise.resolve().then(() => (init_stripe_adapter(), stripe_adapter_exports))
-};
-async function getPaymentProviderAdapter(adapterKey) {
-  const loadAdapter = paymentProviderAdapters[adapterKey];
-  if (!loadAdapter) throw new Error(`Unsupported payment provider adapter: ${adapterKey}`);
-  const loadedAdapter = await loadAdapter();
-  return loadedAdapter.stripePaymentProviderAdapter;
-}
-async function getPaymentProviderAdapterForExecution(adapterKey) {
-  return getPaymentProviderAdapter(adapterKey);
-}
-
-// features/keystone/utils/paymentProviderAdapter.ts
-var PROVIDER_QUERY = "id code adapterKey providerAccountId isInstalled organization { id }";
-async function getPaymentProvider(context, providerCode, organizationId, purpose = "charge") {
-  if (!organizationId) throw new Error("Payment provider organization is required.");
-  const providers = await context.sudo().query.PaymentProvider.findMany({
-    where: {
-      AND: [
-        { code: { equals: providerCode } },
-        purpose === "charge" ? installedPaymentProviderWhere() : reconciliationPaymentProviderWhere(),
-        { organization: { id: { equals: organizationId } } }
-      ]
-    },
-    take: 1,
-    query: PROVIDER_QUERY
-  });
-  const provider = providers[0];
-  if (!provider) throw new Error(`Payment provider ${providerCode} is not installed.`);
-  if (purpose === "charge" && provider.adapterKey === "stripe" && !newPaymentChargesEnabled()) {
-    throw new Error("Card payments are turned off for this Studio deployment.");
-  }
-  return provider;
-}
-async function getAdapterForProvider(context, providerCode, organizationId, purpose = "charge") {
-  const provider = await getPaymentProvider(context, providerCode, organizationId, purpose);
-  const adapter = await getPaymentProviderAdapterForExecution(provider.adapterKey);
-  return { provider, adapter };
-}
-
-// features/keystone/mutations/stripeSubscription.ts
+init_paymentProviderAdapter();
 init_prisma_result();
 init_classCapacity();
 init_studioLifecycle();
@@ -11755,6 +12271,41 @@ function billingAttemptScope(organizationId, membershipId, operation, idempotenc
     requestHash: membershipBillingRequestHash(operation, evidence)
   };
 }
+function freezeRule(membership) {
+  const terms = membership.agreementSnapshot ?? {};
+  const tier = membership.tier ?? {};
+  return {
+    minDays: Number(terms.freezeMinDays ?? tier.freezeMinDays ?? 7),
+    maxDays: Number(terms.freezeMaxDays ?? tier.freezeMaxDays ?? 30),
+    daysPerYear: Number(terms.freezeDaysPerYear ?? tier.freezeDaysPerYear ?? 30)
+  };
+}
+function frozenDaysInLastYear(membership, at) {
+  const since = at.getTime() - 365 * 864e5;
+  const periods = [];
+  for (const entry of Array.isArray(membership.agreementHistory) ? membership.agreementHistory : []) {
+    if (entry?.kind === "freeze" && entry.start && entry.end) periods.push({ start: new Date(entry.start).getTime(), end: new Date(entry.end).getTime() });
+  }
+  if (membership.freezeStartDate && membership.freezeEndDate) periods.push({ start: new Date(membership.freezeStartDate).getTime(), end: new Date(membership.freezeEndDate).getTime() });
+  const seen = /* @__PURE__ */ new Set();
+  let total = 0;
+  for (const p2 of periods) {
+    const key = `${p2.start}:${p2.end}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    total += Math.max(0, Math.min(p2.end, at.getTime()) - Math.max(p2.start, since)) / 864e5;
+  }
+  return Math.ceil(total);
+}
+function cancellationEndDate(membership, now = /* @__PURE__ */ new Date()) {
+  const noticeDays = Number(membership.agreementSnapshot?.cancelNoticeDays ?? membership.tier?.cancelNoticeDays ?? 0);
+  const notice = new Date(now.getTime() + Math.max(noticeDays, 0) * 864e5);
+  const term = minimumTermEnd(membership);
+  const target = term && term > notice ? term : notice;
+  const paidEnd = membership.nextBillingDate ? new Date(membership.nextBillingDate) : null;
+  if (paidEnd && target <= paidEnd) return paidEnd;
+  return target;
+}
 function minimumTermEnd(membership) {
   const months = Number(membership.agreementSnapshot?.contractLength ?? membership.tier?.contractLength ?? 0);
   if (!Number.isInteger(months) || months <= 0 || !membership.startDate) return null;
@@ -11763,13 +12314,6 @@ function minimumTermEnd(membership) {
   const end = new Date(start);
   end.setUTCMonth(end.getUTCMonth() + months);
   return end;
-}
-function minimumTermCancelProblem(membership, now = /* @__PURE__ */ new Date()) {
-  const end = minimumTermEnd(membership);
-  if (!end || now >= end) return null;
-  const months = Number(membership.agreementSnapshot?.contractLength ?? membership.tier?.contractLength);
-  const date = end.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
-  return `This plan has a ${months}-month minimum term, so renewal can be cancelled from ${date}. Contact the front desk to end it sooner.`;
 }
 async function currentMembership(context, membershipId) {
   return context.db.Membership.findOne({ where: { id: membershipId } });
@@ -11801,8 +12345,6 @@ async function cancelMembership(root, { membershipId, reason, idempotencyKey }, 
   }
   if (["cancelled", "expired"].includes(membership.status)) throw new Error(`Membership is already ${membership.status}`);
   if (!membership.autoRenew) throw new Error("Membership renewal is already cancelled");
-  const termProblem = actor2.canManageAllRecords ? null : minimumTermCancelProblem(membership);
-  if (termProblem) throw new Error(termProblem);
   if (!membership.stripeSubscriptionId) throw new Error("Membership has no active Stripe subscription");
   const attempt = await claimMembershipBillingAttempt(context, scope, {
     status: membership.status,
@@ -11814,18 +12356,21 @@ async function cancelMembership(root, { membershipId, reason, idempotencyKey }, 
   try {
     const { adapter } = await getAdapter(context, organizationId);
     providerExecutionStarted = true;
+    const endsOn = cancellationEndDate(membership);
+    const paidEnd = membership.nextBillingDate ? new Date(membership.nextBillingDate) : null;
     const providerSubscription = await adapter.cancelSubscriptionAtPeriodEnd(
       membership.stripeSubscriptionId,
-      attempt.providerIdempotencyKey
+      attempt.providerIdempotencyKey,
+      paidEnd && endsOn.getTime() === paidEnd.getTime() ? null : endsOn
     );
-    const providerPeriodEnd = providerSubscription.current_period_end ? new Date(providerSubscription.current_period_end * 1e3) : membership.nextBillingDate ? new Date(membership.nextBillingDate) : null;
+    const providerPeriodEnd = providerSubscription.cancel_at ? new Date(providerSubscription.cancel_at * 1e3) : providerSubscription.current_period_end ? new Date(providerSubscription.current_period_end * 1e3) : endsOn;
     await finishMembershipBillingAttempt(context, attempt, {
       autoRenew: false,
       nextBillingDate: providerPeriodEnd,
       cancelReason: normalizedReason,
       cancelledAt: null
     });
-    return { membership: await currentMembership(context, membershipId), message: "Membership renewal cancelled at the end of the paid period" };
+    return { membership: await currentMembership(context, membershipId), message: `Membership ends on ${providerPeriodEnd.toISOString().slice(0, 10)}; classes can be booked until then` };
   } catch (error) {
     await failMembershipBillingAttempt(context, attempt, error, providerExecutionStarted ? "unknown" : "definite");
     throw error;
@@ -11903,9 +12448,12 @@ async function freezeMembership(root, { membershipId, endDate, idempotencyKey },
   if (!(membership.agreementSnapshot?.freezeAllowed ?? membership.tier?.freezeAllowed)) throw new Error("This membership tier does not allow freezes");
   if (!membership.stripeSubscriptionId) throw new Error("Membership has no active Stripe subscription");
   const startsAt = /* @__PURE__ */ new Date();
-  const maximumEnd = new Date(startsAt.getTime() + 365 * 24 * 60 * 60 * 1e3);
   if (endsAt <= startsAt) throw new Error("Freeze end date must be in the future");
-  if (endsAt > maximumEnd) throw new Error("Freeze duration cannot exceed one year");
+  const rule = freezeRule(membership);
+  const days = Math.ceil((endsAt.getTime() - startsAt.getTime()) / 864e5);
+  if (days < rule.minDays || days > rule.maxDays) throw new Error(`A freeze is ${rule.minDays} to ${rule.maxDays} days`);
+  const usedThisYear = frozenDaysInLastYear(membership, startsAt);
+  if (usedThisYear + days > rule.daysPerYear) throw new Error(`Your plan allows ${rule.daysPerYear} frozen days a year; ${Math.max(rule.daysPerYear - usedThisYear, 0)} are left`);
   const attempt = await claimMembershipBillingAttempt(context, scope, {
     status: membership.status,
     autoRenew: membership.autoRenew,
@@ -11926,7 +12474,8 @@ async function freezeMembership(root, { membershipId, endDate, idempotencyKey },
     await failMembershipBillingAttempt(context, attempt, error, "unknown");
     throw error;
   }
-  await finishMembershipBillingAttempt(context, attempt, { status: "frozen", freezeStartDate: startsAt, freezeEndDate: endsAt });
+  const history2 = Array.isArray(membership.agreementHistory) ? membership.agreementHistory : [];
+  await finishMembershipBillingAttempt(context, attempt, { status: "frozen", freezeStartDate: startsAt, freezeEndDate: endsAt, agreementHistory: [...history2, { kind: "freeze", start: startsAt.toISOString(), end: endsAt.toISOString(), at: startsAt.toISOString() }] });
   return { membership: await currentMembership(context, membershipId), message: "Membership frozen immediately" };
 }
 async function unfreezeMembership(root, { membershipId, idempotencyKey }, context) {
@@ -12097,6 +12646,7 @@ var import_node_crypto14 = __toESM(require("node:crypto"));
 // features/integrations/payment/membership-checkout-core.ts
 init_stripe_environment_provider();
 init_commercial_agreement();
+init_paymentProviderAdapter();
 init_prisma_result();
 init_classCapacity();
 init_current_actor();
@@ -12407,6 +12957,7 @@ async function initiateMembershipCheckoutForUser(input) {
 }
 
 // features/integrations/payment/provision-membership.ts
+init_paymentProviderAdapter();
 init_classCapacity();
 init_membership_credits();
 init_commercial_agreement();
@@ -12517,6 +13068,7 @@ async function provisionMembershipFromCheckoutSession(providerSessionId, expecte
 
 // features/keystone/mutations/paymentWebhook.ts
 init_stripe_environment_provider();
+init_payment();
 init_lifecycles();
 init_operational_notices();
 init_membership_credits();
@@ -12609,6 +13161,7 @@ function assertAppointmentReplayMatches(existing, request) {
 init_operational_notices();
 
 // features/keystone/lib/counter-card-payment.ts
+init_paymentProviderAdapter();
 init_stripe_environment_provider();
 init_internal_origin();
 var COUNTER_SOURCE = "openfront-pilates-counter";
@@ -13784,6 +14337,7 @@ init_operational_notices();
 init_operational_policy();
 init_internal_origin();
 init_stripe_environment_provider();
+init_paymentProviderAdapter();
 init_classCapacity();
 var DROP_IN_SOURCE = "openfront-pilates-drop-in";
 var PROVIDER_CODE3 = "pp_stripe";
@@ -14039,13 +14593,14 @@ init_prisma_result();
 init_internal_origin();
 init_clientSource();
 init_publicStudio();
+init_paymentProviderAdapter();
 init_classCapacity();
 var GIFT_CARD_SOURCE = "openfront-pilates-gift-card";
 var GIFT_CARD_AMOUNTS = [2500, 5e3, 7500, 1e4, 15e3, 2e4];
 var PROVIDER_CODE4 = "pp_stripe";
 var CHECKOUT_MINUTES2 = 30;
 var EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-var usd = (cents) => `$${(cents / 100).toFixed(cents % 100 ? 2 : 0)}`;
+var usd = (cents2) => `$${(cents2 / 100).toFixed(cents2 % 100 ? 2 : 0)}`;
 function giftCodeFor(seed) {
   return import_node_crypto12.default.createHash("sha256").update(`studio-gift:${seed}`).digest("hex").slice(0, 12).toUpperCase().match(/.{4}/g).join("-");
 }
@@ -14335,6 +14890,7 @@ init_current_actor();
 init_internal_origin();
 init_credits();
 init_stripe_environment_provider();
+init_paymentProviderAdapter();
 init_classCapacity();
 var PACK_SOURCE = "openfront-pilates-pack";
 var PROVIDER_CODE5 = "pp_stripe";
@@ -14649,18 +15205,18 @@ async function tierForProviderPrice(transaction, subscription, organizationId) {
 async function findUserForSubscription(transaction, subscription, organizationId) {
   const customerId = typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id;
   if (!customerId) return null;
-  const select32 = { id: true, organizationId: true, stripeCustomerId: true };
+  const select34 = { id: true, organizationId: true, stripeCustomerId: true };
   if (subscription.metadata?.userId) {
     const user2 = await transaction.user.findFirst({
       where: { id: subscription.metadata.userId, organizationId },
-      select: select32
+      select: select34
     });
     if (user2?.stripeCustomerId && user2.stripeCustomerId !== customerId) throw new Error("Subscription customer does not match the existing user");
     if (user2) return { user: user2, customerId };
   }
   const user = await transaction.user.findFirst({
     where: { stripeCustomerId: customerId, organizationId },
-    select: select32
+    select: select34
   });
   return user ? { user, customerId } : null;
 }
@@ -15173,7 +15729,7 @@ async function processVerifiedPaymentEvent(context, provider, adapter, organizat
         } else if (session.metadata?.source === DROP_IN_SOURCE) {
           await fulfillDropInCheckout(context, organizationId, session.id);
         } else if (session.metadata?.source === PACK_SOURCE) {
-          await fulfillPackCheckout(context, organizationId, session.id);
+          await fulfillPackCheckout(context, organizationId, session.id, { session, providerId: provider.id });
         } else if (session.metadata?.source === GIFT_CARD_SOURCE) {
           await fulfillGiftCardCheckout(context, organizationId, session.id);
         } else if (session.mode === "subscription" && event.type === "checkout.session.completed") {
@@ -15277,6 +15833,7 @@ async function processVerifiedPaymentEvent(context, provider, adapter, organizat
 }
 
 // features/keystone/mutations/paymentLifecycle.ts
+init_paymentProviderAdapter();
 init_prisma_result();
 var PROVIDER_CODE6 = "pp_stripe";
 async function acquireRefundAdvisoryLock(transaction, paymentId) {
@@ -15552,11 +16109,16 @@ async function cancelClassBooking(root, { bookingId }, context) {
   });
   const late = Boolean(result.lateCancelled);
   if (result.cancelled && !late) await refundCancelledDropIns(context, actor2.organizationId, [result.bookingId]);
+  const feeId = result.feeId;
+  if (feeId) {
+    const { chargeAssessedFee: chargeAssessedFee2 } = await Promise.resolve().then(() => (init_fees2(), fees_exports));
+    await chargeAssessedFee2(context, feeId);
+  }
   const booking = await context.db.ClassBooking.findOne({ where: { id: result.bookingId } });
   return {
     booking,
     promoted: result.promotion.promoted,
-    message: !result.cancelled ? "Booking was already cancelled" : late ? "Booking cancelled inside the late-cancel window; the credit isn't returned" : "Booking cancelled"
+    message: !result.cancelled ? "Booking was already cancelled" : late ? result.quote?.message ?? "Booking cancelled inside the late-cancel window" : "Booking cancelled"
   };
 }
 async function cancelClassInstance(_root, args, context) {
@@ -17178,10 +17740,10 @@ async function saveStudioClassSchedule(_root, { id, data }, context) {
     if (id && !existing) throw new Error("Schedule not found");
     const next = { organizationId };
     for (const key of ["name", "description", "dayOfWeek", "startTime", "endTime", "maxCapacity", "isActive"]) if (data[key] !== void 0) next[key] = data[key];
-    for (const [field, list42] of [["instructor", "instructor"], ["classType", "classType"], ["location", "location"], ["resource", "room"]]) {
+    for (const [field, list44] of [["instructor", "instructor"], ["classType", "classType"], ["location", "location"], ["resource", "room"]]) {
       if (data[field] === void 0) continue;
       const relatedId = data[field]?.disconnect ? null : data[field]?.connect?.id;
-      if (relatedId !== null && (typeof relatedId !== "string" || !await tx[list42].findFirst({ where: { id: relatedId, organizationId } }))) throw new Error(`${field} is not in this organization`);
+      if (relatedId !== null && (typeof relatedId !== "string" || !await tx[list44].findFirst({ where: { id: relatedId, organizationId } }))) throw new Error(`${field} is not in this organization`);
       next[`${field}Id`] = relatedId;
     }
     const merged = { ...existing, ...next };
@@ -19069,7 +19631,203 @@ async function closeRetail(_r, { data }, context) {
   return closeRetailAtomic(context.prisma, data, retailActorFromContext(context));
 }
 
+// features/keystone/mutations/payroll.ts
+init_currentRoleActor();
+init_prisma_result();
+init_classCapacity();
+init_fees2();
+var money = (cents2) => `$${(cents2 / 100).toFixed(2)}`;
+function classPay(rate, headcount) {
+  const extra = Math.max(headcount - rate.bonusAbove, 0);
+  const computed = rate.classBase + extra * rate.perHeadBonus;
+  const amount = Math.max(computed, rate.floor);
+  const rule = `${money(rate.classBase)} base + ${extra} \xD7 ${money(rate.perHeadBonus)} above ${rate.bonusAbove}${amount > computed ? `, raised to the ${money(rate.floor)} floor` : ""} = ${money(amount)}`;
+  return { amount, rule };
+}
+async function rateFor(tx, organizationId, instructorId, at) {
+  return tx.payRate.findFirst({ where: { organizationId, instructorId, effectiveFrom: { lte: at } }, orderBy: [{ effectiveFrom: "desc" }, { createdAt: "desc" }] });
+}
+async function writeClassPayLineInTx(txIn, input) {
+  const tx = guardKeystonePrismaResults(txIn);
+  const instance = await tx.classInstance.findFirst({ where: { id: input.classInstanceId, organizationId: input.organizationId }, include: { classSchedule: { select: { instructorId: true } } } });
+  const instructorId = instance?.instructorId ?? instance?.classSchedule?.instructorId;
+  if (!instance || !instructorId || instance.isCancelled) return null;
+  const rate = await rateFor(tx, input.organizationId, instructorId, instance.date);
+  if (!rate) return null;
+  const headcount = await tx.classBooking.count({ where: { classInstanceId: instance.id, organizationId: input.organizationId, status: "attended" } });
+  const { amount, rule } = classPay(rate, headcount);
+  const lineKey = `class:${instance.id}`;
+  const existing = await tx.payLine.findFirst({ where: { organizationId: input.organizationId, lineKey } });
+  if (existing && ["locked", "paid"].includes(existing.status)) return existing;
+  const data = { instructorId, kind: "class", classInstanceId: instance.id, workDate: instance.date, headcount, amount, currencyCode: rate.currencyCode || "USD", rule, status: "accrued", payRateId: rate.id, createdById: input.actorId };
+  return existing ? tx.payLine.update({ where: { id: existing.id }, data }) : tx.payLine.create({ data: { ...data, organizationId: input.organizationId, lineKey } });
+}
+async function voidClassPayLineInTx(txIn, input) {
+  const tx = guardKeystonePrismaResults(txIn);
+  const line = await tx.payLine.findFirst({ where: { organizationId: input.organizationId, lineKey: `class:${input.classInstanceId}` } });
+  if (!line) return null;
+  if (["locked", "paid"].includes(line.status)) throw new Error("This pay line is in a locked payroll run");
+  return tx.payLine.update({ where: { id: line.id }, data: { status: "void" } });
+}
+registerClassPayLineHooks(writeClassPayLineInTx, voidClassPayLineInTx);
+async function payrollActor(context) {
+  const actor2 = await currentRoleActor(context);
+  if (!actor2.canManagePayroll && !actor2.canManageAllRecords) throw new Error("Payroll permission required");
+  return actor2;
+}
+var cents = (value, label) => {
+  const n = Number(value ?? 0);
+  if (!Number.isInteger(n) || n < 0 || n > 1e7) throw new Error(`${label} must be whole cents from 0`);
+  return n;
+};
+async function savePayRate(_root, args, context) {
+  const actor2 = await payrollActor(context);
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const instructor = await prisma.instructor.findFirst({ where: { id: args.instructorId, organizationId: actor2.organizationId }, select: { id: true } });
+  if (!instructor) throw new Error("Instructor not found");
+  const d = args.data || {};
+  const effectiveFrom = d.effectiveFrom ? new Date(d.effectiveFrom) : /* @__PURE__ */ new Date();
+  if (!Number.isFinite(effectiveFrom.getTime())) throw new Error("Effective date is invalid");
+  const bonusAbove = Number(d.bonusAbove ?? 0);
+  if (!Number.isInteger(bonusAbove) || bonusAbove < 0 || bonusAbove > 500) throw new Error("Bonus threshold must be 0 to 500 clients");
+  return prisma.payRate.create({ data: {
+    organizationId: actor2.organizationId,
+    instructorId: instructor.id,
+    effectiveFrom,
+    bonusAbove,
+    classBase: cents(d.classBase, "Class base"),
+    perHeadBonus: cents(d.perHeadBonus, "Per-head bonus"),
+    floor: cents(d.floor, "Floor"),
+    privateAmount: cents(d.privateAmount, "Private"),
+    duetAmount: cents(d.duetAmount, "Duet"),
+    trioAmount: cents(d.trioAmount, "Trio"),
+    hourlyAmount: cents(d.hourlyAmount, "Hourly"),
+    currencyCode: String(d.currencyCode || "USD").toUpperCase()
+  } });
+}
+async function addPayLine(_root, args, context) {
+  const actor2 = await payrollActor(context);
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const instructor = await prisma.instructor.findFirst({ where: { id: args.instructorId, organizationId: actor2.organizationId }, select: { id: true } });
+  if (!instructor) throw new Error("Instructor not found");
+  const note = String(args.note || "").trim();
+  if (note.length < 3) throw new Error("A note is required");
+  const workDate = new Date(args.workDate);
+  if (!Number.isFinite(workDate.getTime())) throw new Error("Work date is invalid");
+  const lineKey = `manual:${String(args.idempotencyKey || "").slice(0, 200)}`;
+  if (lineKey.length < 15) throw new Error("A request key is required");
+  const existing = await prisma.payLine.findFirst({ where: { organizationId: actor2.organizationId, lineKey } });
+  if (existing) return existing;
+  if (args.kind === "hourly") {
+    const minutes = Number(args.minutes);
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 24 * 60) throw new Error("Minutes must be 1 to 1440");
+    const rate = await rateFor(prisma, actor2.organizationId, instructor.id, workDate);
+    if (!rate?.hourlyAmount) throw new Error("This instructor has no hourly rate");
+    const amount2 = Math.round(rate.hourlyAmount * minutes / 60);
+    return prisma.payLine.create({ data: { organizationId: actor2.organizationId, lineKey, instructorId: instructor.id, kind: "hourly", workDate, hours: minutes, amount: amount2, currencyCode: rate.currencyCode, rule: `${minutes} min \xD7 ${money(rate.hourlyAmount)}/h = ${money(amount2)}`, note, status: "accrued", payRateId: rate.id, createdById: actor2.userId } });
+  }
+  if (args.kind !== "adjustment") throw new Error("A manual line is hourly or an adjustment");
+  const amount = Number(args.amount);
+  if (!Number.isInteger(amount) || amount === 0 || Math.abs(amount) > 1e7) throw new Error("Adjustment must be non-zero whole cents");
+  return prisma.payLine.create({ data: { organizationId: actor2.organizationId, lineKey, instructorId: instructor.id, kind: "adjustment", workDate, amount, rule: `Adjustment ${money(amount)}`, note, status: "accrued", createdById: actor2.userId } });
+}
+async function openPayrollRun(_root, args, context) {
+  const actor2 = await payrollActor(context);
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const from = new Date(args.from), to = new Date(args.to);
+  if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || to <= from) throw new Error("The period is invalid");
+  const lines = await prisma.payLine.findMany({ where: { organizationId: actor2.organizationId, status: "accrued", runId: null, workDate: { gte: from, lt: to } }, select: { id: true, amount: true }, take: 1e4 });
+  return prisma.$transaction(async (tx) => {
+    const run = await tx.payrollRun.create({ data: { organizationId: actor2.organizationId, periodStart: from, periodEnd: to, status: "draft", total: lines.reduce((sum, l) => sum + l.amount, 0) } });
+    if (lines.length) await tx.payLine.updateMany({ where: { id: { in: lines.map((l) => l.id) }, status: "accrued", runId: null }, data: { runId: run.id } });
+    return { ...run, lines: lines.length };
+  });
+}
+async function lockPayrollRun(_root, { runId }, context) {
+  const actor2 = await payrollActor(context);
+  return withKeystonePrismaTransaction(context.prisma, async (tx) => {
+    await lockTransactionKey(tx, `payroll-run:${runId}`);
+    const run = await tx.payrollRun.findFirst({ where: { id: runId, organizationId: actor2.organizationId } });
+    if (!run) throw new Error("Payroll run not found");
+    if (run.status !== "draft") return run;
+    const lines = await tx.payLine.findMany({ where: { runId: run.id, status: "accrued" }, select: { id: true, amount: true } });
+    await tx.payLine.updateMany({ where: { runId: run.id, status: "accrued" }, data: { status: "locked" } });
+    await tx.payLine.updateMany({ where: { runId: run.id, status: "void" }, data: { runId: null } });
+    return tx.payrollRun.update({ where: { id: run.id }, data: { status: "locked", lockedAt: /* @__PURE__ */ new Date(), lockedById: actor2.userId, total: lines.reduce((s, l) => s + l.amount, 0) } });
+  });
+}
+async function markPayrollPaid(_root, args, context) {
+  const actor2 = await payrollActor(context);
+  return withKeystonePrismaTransaction(context.prisma, async (tx) => {
+    await lockTransactionKey(tx, `payroll-run:${args.runId}`);
+    const run = await tx.payrollRun.findFirst({ where: { id: args.runId, organizationId: actor2.organizationId } });
+    if (!run) throw new Error("Payroll run not found");
+    if (run.status === "draft") throw new Error("Lock the run before recording payments");
+    const lines = await tx.payLine.findMany({ where: { runId: run.id, status: { in: ["locked", "paid"] } }, include: { instructor: { include: { user: { select: { name: true } } } } } });
+    const totals = /* @__PURE__ */ new Map();
+    for (const l of lines) totals.set(l.instructorId, { name: l.instructor?.user?.name ?? "", amount: (totals.get(l.instructorId)?.amount ?? 0) + l.amount });
+    const previous = Array.isArray(run.payouts) ? run.payouts : [];
+    const payouts = [...previous];
+    for (const p2 of args.payouts || []) {
+      if (!totals.has(p2.instructorId)) throw new Error("An instructor in the payouts has no lines in this run");
+      if (!["bank_transfer", "cash", "check", "payroll_provider", "other"].includes(p2.method)) throw new Error("Method is bank_transfer, cash, check, payroll_provider or other");
+      const entry = { instructorId: p2.instructorId, name: totals.get(p2.instructorId).name, amount: totals.get(p2.instructorId).amount, method: p2.method, reference: String(p2.reference || "").slice(0, 200), paidAt: p2.paidAt ? new Date(p2.paidAt).toISOString() : (/* @__PURE__ */ new Date()).toISOString(), recordedBy: actor2.userId };
+      const i = payouts.findIndex((x) => x.instructorId === p2.instructorId);
+      if (i >= 0) payouts[i] = entry;
+      else payouts.push(entry);
+      await tx.payLine.updateMany({ where: { runId: run.id, instructorId: p2.instructorId, status: "locked" }, data: { status: "paid" } });
+    }
+    const allPaid = [...totals.keys()].every((id) => payouts.some((p2) => p2.instructorId === id));
+    return tx.payrollRun.update({ where: { id: run.id }, data: { payouts, status: allPaid ? "paid" : "locked", paidAt: allPaid ? /* @__PURE__ */ new Date() : null } });
+  });
+}
+var csvCell = (value) => {
+  const text44 = String(value ?? "");
+  const safe = /^[=+\-@\t\r]/.test(text44) ? `'${text44}` : text44;
+  return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+};
+async function exportPayrollRun(_root, { runId }, context) {
+  const actor2 = await payrollActor(context);
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const run = await prisma.payrollRun.findFirst({ where: { id: runId, organizationId: actor2.organizationId } });
+  if (!run) throw new Error("Payroll run not found");
+  const lines = await prisma.payLine.findMany({ where: { runId: run.id, status: { not: "void" } }, include: { instructor: { include: { user: { select: { name: true, email: true } } } }, classInstance: { include: { classSchedule: { select: { name: true } } } } }, orderBy: [{ instructorId: "asc" }, { workDate: "asc" }], take: 1e4 });
+  const header2 = ["Instructor", "Email", "Date", "Kind", "Class or session", "Headcount", "Minutes", "Amount", "Currency", "Rule", "Note", "Status"];
+  const rows = lines.map((l) => [l.instructor?.user?.name, l.instructor?.user?.email, new Date(l.workDate).toISOString().slice(0, 10), l.kind, l.classInstance?.classSchedule?.name ?? (l.appointmentId ? "Appointment" : ""), l.headcount, l.hours, (l.amount / 100).toFixed(2), l.currencyCode, l.rule, l.note, l.status]);
+  const csv = [header2, ...rows].map((r) => r.map(csvCell).join(",")).join("\n");
+  return { filename: `payroll-${new Date(run.periodStart).toISOString().slice(0, 10)}-to-${new Date(run.periodEnd).toISOString().slice(0, 10)}.csv`, csv, lines: lines.length, total: lines.reduce((s, l) => s + l.amount, 0) };
+}
+async function payrollWorkspace(_root, _args, context) {
+  const actor2 = await currentRoleActor(context);
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const staff = actor2.canManagePayroll || actor2.canManageAllRecords;
+  const own = staff ? null : await prisma.instructor.findFirst({ where: { organizationId: actor2.organizationId, userId: actor2.userId }, select: { id: true } });
+  if (!staff && !own) throw new Error("Payroll permission required");
+  const scope = own ? { instructorId: own.id } : {};
+  const [instructors, rates, lines, runs] = await Promise.all([
+    prisma.instructor.findMany({ where: { organizationId: actor2.organizationId, ...own ? { id: own.id } : {} }, include: { user: { select: { name: true } } }, take: 500 }),
+    prisma.payRate.findMany({ where: { organizationId: actor2.organizationId, ...scope }, orderBy: [{ effectiveFrom: "desc" }], take: 1e3 }),
+    prisma.payLine.findMany({ where: { organizationId: actor2.organizationId, ...scope, status: { in: ["accrued", "locked"] } }, orderBy: [{ workDate: "desc" }], take: 500 }),
+    staff ? prisma.payrollRun.findMany({ where: { organizationId: actor2.organizationId }, orderBy: [{ periodStart: "desc" }], take: 50 }) : Promise.resolve([])
+  ]);
+  return { canManage: Boolean(staff), instructors: instructors.map((i) => ({ id: i.id, name: i.user?.name ?? "", currentRate: rates.find((r) => r.instructorId === i.id) ?? null })), lines, runs };
+}
+var payrollTypeDefs = `
+  extend type Query {
+    payrollWorkspace: JSON!
+    exportPayrollRun(runId: ID!): JSON!
+  }
+  extend type Mutation {
+    savePayRate(instructorId: ID!, data: JSON!): JSON!
+    addPayLine(instructorId: ID!, kind: String!, workDate: String!, minutes: Int, amount: Int, note: String!, idempotencyKey: String!): JSON!
+    openPayrollRun(from: String!, to: String!): JSON!
+    lockPayrollRun(runId: ID!): JSON!
+    markPayrollPaid(runId: ID!, payouts: JSON!): JSON!
+  }
+`;
+
 // features/keystone/mutations/index.ts
+init_fees2();
 init_rooms();
 
 // features/keystone/mutations/coachProfiles.ts
@@ -19573,7 +20331,7 @@ function extendGraphqlSchema(baseSchema) {
         activeMemberships: Int!
         pastDueCount: Int!
       }
-    `, trainingWorkspaceTypeDefs, retailTypeDefs, counterPaymentTypeDefs, dropInTypeDefs, roomTypeDefs, packTypeDefs, giftCardTypeDefs, staffIntentTypeDefs, coachProfileTypeDefs],
+    `, trainingWorkspaceTypeDefs, retailTypeDefs, counterPaymentTypeDefs, dropInTypeDefs, roomTypeDefs, packTypeDefs, feeTypeDefs, payrollTypeDefs, giftCardTypeDefs, staffIntentTypeDefs, coachProfileTypeDefs],
     resolvers: {
       Query: {
         retailWorkspace,
@@ -19581,6 +20339,9 @@ function extendGraphqlSchema(baseSchema) {
         studioSettingsEditor,
         classAvailability,
         myCredits,
+        quoteCancellation,
+        payrollWorkspace,
+        exportPayrollRun,
         roomsWorkspace,
         trainingWorkspace: getTrainingWorkspace,
         operationsWorkspace,
@@ -19658,6 +20419,16 @@ function extendGraphqlSchema(baseSchema) {
         startPackCheckout,
         completePackCheckout,
         adjustCredits,
+        payFee,
+        waiveFee,
+        refundFee,
+        closeClass,
+        reopenClass,
+        savePayRate,
+        addPayLine,
+        openPayrollRun,
+        lockPayrollRun,
+        markPayrollPaid,
         leaveWaitlist,
         changeBookingSpot,
         saveRoomLayout,
@@ -19947,7 +20718,7 @@ var { withAuth } = (0, import_auth2.createAuth)({
   `
 });
 var keystone_default = withAuth(
-  (0, import_core41.config)({
+  (0, import_core43.config)({
     db: {
       provider: "postgresql",
       url: pooledDatabaseUrl(databaseURL),
