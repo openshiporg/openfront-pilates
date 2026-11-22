@@ -144,12 +144,13 @@ export const testPaymentProviderAdapter: PaymentProviderAdapter = {
     return { id, clientSecret: `${id}_secret` };
   },
 
-  async cancelSubscriptionAtPeriodEnd(subscriptionId) {
+  async cancelSubscriptionAtPeriodEnd(subscriptionId, _key, cancelAt) {
     return updateTestSubscription(subscriptionId, {
       status: "active",
-      cancel_at_period_end: true,
+      cancel_at_period_end: !cancelAt,
+      ...(cancelAt ? { cancel_at: Math.floor(cancelAt.getTime() / 1000) } : {}),
       current_period_end: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60,
-    });
+    } as any);
   },
 
   async cancelSubscriptionNow(subscriptionId) {

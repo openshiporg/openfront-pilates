@@ -28,8 +28,6 @@ import { RefundAttempt } from './RefundAttempt';
 import { MembershipBillingAttempt } from './MembershipBillingAttempt';
 import { AuthRateLimitBucket } from './AuthRateLimitBucket';
 import { OperationalNotice, ParticipationPolicy, ParticipationEvidence, OperationsCase, IntegrationCredential } from './Operations';
-import { MembershipCreditGrant } from './MembershipCreditGrant';
-import { MembershipCreditEntry } from './MembershipCreditEntry';
 import { TrainingPackage } from './TrainingPackage';
 import { TrainingCreditEntry } from './TrainingCreditEntry';
 import { ContactMessage } from './ContactMessage';
@@ -39,15 +37,15 @@ import { RetailItem, RetailSale, RetailReturn, RetailStockEntry, RetailClose } f
 import { CounterPaymentAttempt } from './CounterPaymentAttempt';
 import { StaffIntent } from './StaffIntent';
 import { Spot } from './Spot';
+import { ClassPack, CreditGrant, CreditEntry } from './Credits';
 
 export const models = {
-  Spot,
+  Spot, ClassPack, CreditGrant, CreditEntry,
   RetailItem, RetailSale, RetailReturn, RetailStockEntry, RetailClose, CounterPaymentAttempt, StaffIntent,
   MemberImportRecord,
   TrainingPackage, TrainingCreditEntry,
   ContactMessage,
   GiftCard,
-  MembershipCreditGrant, MembershipCreditEntry,
   OperationalNotice, ParticipationPolicy, ParticipationEvidence, OperationsCase, IntegrationCredential,
   Organization,
   User,

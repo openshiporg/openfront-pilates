@@ -85,6 +85,7 @@ import { importMemberContacts } from './portableData';
 import { retailTypeDefs, retailWorkspace, retailSaleItems, saveRetailItem, quoteRetailSale, sellRetail, returnRetail, closeRetail } from './retailLifecycle';
 import { counterPaymentTypeDefs, reconcileCounterPayment } from './counterPayments';
 import { completeDropInCheckout, dropInTypeDefs, startDropInCheckout } from './dropIn';
+import { packTypeDefs, startPackCheckout, completePackCheckout, myCredits, adjustCredits } from './packs';
 import { roomTypeDefs, classAvailability, roomsWorkspace, joinWaitlist, leaveWaitlist, changeBookingSpot, saveRoomLayout, setSpotOutOfService, promoteWaitlistBooking } from './rooms';
 import { confirmGiftCardOrder, giftCardOptions, giftCardTypeDefs, giftCardsWorkspace, lookupGiftCard, redeemGiftCard, refundGiftCard, startGiftCardCheckout } from './giftCards';
 import { beginStaffIntent, getMyPendingStaffIntents, getStaffIntent, settleStaffIntent, staffIntentTypeDefs } from './staffIntents';
@@ -553,13 +554,14 @@ export function extendGraphqlSchema(baseSchema: GraphQLSchema) {
         activeMemberships: Int!
         pastDueCount: Int!
       }
-    `, trainingWorkspaceTypeDefs, retailTypeDefs, counterPaymentTypeDefs, dropInTypeDefs, roomTypeDefs, giftCardTypeDefs, staffIntentTypeDefs, coachProfileTypeDefs],
+    `, trainingWorkspaceTypeDefs, retailTypeDefs, counterPaymentTypeDefs, dropInTypeDefs, roomTypeDefs, packTypeDefs, giftCardTypeDefs, staffIntentTypeDefs, coachProfileTypeDefs],
     resolvers: {
       Query: {
         retailWorkspace,
         retailSaleItems,
         studioSettingsEditor,
         classAvailability,
+        myCredits,
         roomsWorkspace,
         trainingWorkspace: getTrainingWorkspace,
         operationsWorkspace,
@@ -616,6 +618,9 @@ export function extendGraphqlSchema(baseSchema: GraphQLSchema) {
         runOperationsCommand,
         bookClass,
         joinWaitlist,
+        startPackCheckout,
+        completePackCheckout,
+        adjustCredits,
         leaveWaitlist,
         changeBookingSpot,
         saveRoomLayout,

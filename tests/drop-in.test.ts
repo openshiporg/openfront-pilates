@@ -15,9 +15,10 @@ test("the drop-in price is cents between $0.50 and $1,000, or 0 to sell drop-ins
 
 test("a paid drop-in books through the shared capacity path without a membership or credit, and never waitlists", () => {
   const capacity = source("features/keystone/mutations/classCapacity.ts");
-  assert.match(capacity, /if \(!dropIn && !membership\) throw new Error\("No active membership found"\)/);
+  assert.match(capacity, /const noUsableCredit = !dropIn && !grant;/);
+  assert.match(capacity, /requireCredit: false, actorIsStaff: input\.actorCanManageAllRecords, dropIn: Boolean\(dropIn\)/);
   assert.match(capacity, /if \(atCapacity && dropIn\) throw new Error\(DROP_IN_CLASS_FULL\)/);
-  assert.match(capacity, /status === "confirmed" && membership\) await debitBookingCredit/);
+  assert.match(capacity, /status === "confirmed" && !dropIn\) await debitBookingCredit/);
   assert.match(capacity, /basis: "drop_in_paid"/);
 });
 

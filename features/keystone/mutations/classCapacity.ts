@@ -1,4 +1,5 @@
-import { assertNoPendingMembershipFreeze, ensureMonthlyCreditGrant, debitBookingCredit } from "../lib/membership-credits";
+import { debitBookingCredit } from "../lib/membership-credits";
+import { assertBookingRules } from "../lib/booking-rules";
 import { assertParticipationAllowed, lockParticipationPolicy } from "../lib/operational-policy";
 import { enqueueOperationalNotice } from "../lib/operational-notices";
 import { guardKeystonePrismaResults } from "../lib/prisma-result";
@@ -208,7 +209,7 @@ export async function createCapacityControlledBookingInTransaction(transaction: 
         classSchedule: {
           select: {
             id: true, name: true, maxCapacity: true, startTime: true, endTime: true, isActive: true, resourceId: true, resource: PHYSICAL_RESOURCE,
-            classType: { select: { id: true, name: true, capacityMode: true } },
+            classType: { select: { id: true, name: true, capacityMode: true, requiresIntro: true, creditKind: true } },
             location: { select: { id: true, name: true, address: true, isActive: true } },
             instructor: { select: { id: true, user: { select: { name: true } } } },
           },
@@ -255,19 +256,14 @@ export async function createCapacityControlledBookingInTransaction(transaction: 
     }
 
     const dropIn = input.dropIn ?? null;
-    const membership = dropIn ? null : await transaction.membership.findFirst({
-      where: { memberId: member.user.id, organizationId: input.actorOrganizationId, status: "active" },
-      include: { tier: { select: { classCreditsPerMonth: true, maxClassBookings: true } } },
-    });
-    if (!dropIn && !membership) throw new Error("No active membership found");
-    if (membership) await assertNoPendingMembershipFreeze(transaction, input.actorOrganizationId, membership.id);
-
     const participation = await assertParticipationAllowed(transaction, input.actorOrganizationId, member.id, classInstance.date, classInstance.locationId);
-    const grant = membership ? await ensureMonthlyCreditGrant(transaction, membership, classInstance.date) : null;
-    const unlimited = grant ? grant.allowance === -1 : false;
-    const currentCredits = grant ? grant.remaining : 0;
     // Joining a waitlist spends nothing (4.2); a confirmed place needs a usable credit now.
-    const noUsableCredit = Boolean(grant && !unlimited && currentCredits <= 0);
+    const funding = await assertBookingRules(transaction, { organizationId: input.actorOrganizationId, member, instance: classInstance, requireCredit: false, actorIsStaff: input.actorCanManageAllRecords, dropIn: Boolean(dropIn) });
+    const membership = funding.membership;
+    const grant = funding.grant;
+    const unlimited = funding.unlimited;
+    const currentCredits = funding.remaining;
+    const noUsableCredit = !dropIn && !grant;
 
     const maximumBookings = membership ? membership.agreementSnapshot?.maxClassBookings ?? membership.tier?.maxClassBookings ?? 0 : 0;
     if (maximumBookings > 0 && await transaction.classBooking.count({ where: { organizationId: input.actorOrganizationId, memberId: member.id, status: { in: ["confirmed", "waitlisted"] }, classInstance: { date: { gt: new Date() } } } }) >= maximumBookings) throw new Error("Membership concurrent booking limit reached");
@@ -319,7 +315,7 @@ export async function createCapacityControlledBookingInTransaction(transaction: 
       select: { id: true },
     });
 
-    if (status === "confirmed" && membership) await debitBookingCredit(transaction, membership, booking.id, classInstance.date);
+    if (status === "confirmed" && !dropIn) await debitBookingCredit(transaction, membership, booking.id, classInstance.date, { memberId: member.id, locationId: classInstance.locationId ?? null });
     await enqueueOperationalNotice(transaction, { organizationId: input.actorOrganizationId, memberId: member.id,
       key: `booking:${booking.id}:created`, kind: "booking", message: dropIn ? "Your drop-in class is paid and confirmed." : status === "confirmed" ? "Your class booking is confirmed." : "You joined the waitlist. A released place is automatically confirmed and reserves any required class credit; we will notify you." });
 
@@ -331,7 +327,7 @@ export async function createCapacityControlledBookingInTransaction(transaction: 
       waitlistPosition,
       creditsRemaining: dropIn ? 0 : unlimited
         ? -1
-        : currentCredits - (status === "confirmed" ? 1 : 0),
+        : Math.max(currentCredits - (status === "confirmed" ? 1 : 0), 0),
     };
   }
 }
@@ -370,20 +366,22 @@ function bookingServiceSnapshot(classInstance: any, terms: { unlimited: boolean;
     locationAddress: site?.address ?? null,
     startsAt: classInstance.date.toISOString(),
     endsAt: new Date(endsAt).toISOString(),
-    creditTerms: terms.dropIn ? "paid drop-in visit" : unlimitedCredits ? "unlimited membership" : "one membership class credit, restored if cancelled before the class starts",
+    creditTerms: terms.dropIn ? "paid drop-in visit" : unlimitedCredits ? "unlimited membership" : terms.grant?.source && terms.grant.source !== "membership_period" ? "one class credit from a pack, restored if cancelled in time" : "one membership class credit, restored if cancelled in time",
     credit: terms.dropIn ? {
       basis: "drop_in_paid",
       paymentSessionId: terms.dropIn.paymentSessionId,
       amount: terms.dropIn.amount,
       currencyCode: terms.dropIn.currencyCode,
     } : {
-      membershipId: terms.membership.id,
-      agreementVersion: terms.membership.agreementSnapshot?.version ?? null,
+      // The credit source at booking time (§4.2 snapshot). The spent grant itself is on the debit entry.
+      source: terms.grant?.source ?? null,
+      membershipId: terms.membership?.id ?? null,
+      agreementVersion: terms.membership?.agreementSnapshot?.version ?? null,
       grantId: terms.grant?.id ?? null,
-      periodStart: terms.grant?.periodStart ? new Date(terms.grant.periodStart).toISOString() : null,
-      periodEnd: terms.grant?.periodEnd ? new Date(terms.grant.periodEnd).toISOString() : null,
+      periodStart: terms.grant?.validFrom ? new Date(terms.grant.validFrom).toISOString() : null,
+      periodEnd: terms.grant?.expiresAt ? new Date(terms.grant.expiresAt).toISOString() : null,
       // A waitlist place reserves its credit only when it is confirmed (see the booking's credit entry).
-      basis: unlimitedCredits ? "unlimited" : terms.status === "confirmed" ? "debited_at_booking" : "debited_when_confirmed",
+      basis: "credit", spent: unlimitedCredits ? "unlimited" : terms.status === "confirmed" ? "debited_at_booking" : "debited_when_confirmed",
     },
     participation: terms.participation,
   };
@@ -430,7 +428,7 @@ export async function promoteCapacityControlledWaitlistBookingInTransaction(
     include: {
       location: { select: { isActive: true } },
       resource: PHYSICAL_RESOURCE,
-      classSchedule: { select: { maxCapacity: true, startTime: true, endTime: true, isActive: true, resourceId: true, location: { select: { isActive: true } }, resource: PHYSICAL_RESOURCE, classType: { select: { capacityMode: true } } } },
+      classSchedule: { select: { maxCapacity: true, startTime: true, endTime: true, isActive: true, resourceId: true, locationId: true, location: { select: { isActive: true } }, resource: PHYSICAL_RESOURCE, classType: { select: { capacityMode: true, requiresIntro: true, creditKind: true } } } },
     },
   });
   if (!classInstance) throw new Error("Class instance not found");
@@ -478,41 +476,27 @@ export async function promoteCapacityControlledWaitlistBookingInTransaction(
       throw new Error("Waitlisted member is not in the class organization");
     }
     if (candidate.member?.status !== "active" || !candidate.member?.user?.id) continue;
-    const candidateMembership = await transaction.membership.findFirst({
-      where: { memberId: candidate.member.user.id, organizationId, status: "active" },
-      include: { tier: { select: { classCreditsPerMonth: true, maxClassBookings: true } } },
-    });
-    if (!candidateMembership) continue;
     await lockTransactionKey(transaction, `member:${candidate.memberId}`);
-    const lockedMembership = await transaction.membership.findFirst({
-      where: { id: candidateMembership.id, organizationId, status: "active" },
-      include: { tier: { select: { classCreditsPerMonth: true, maxClassBookings: true } } },
-    });
-    if (!lockedMembership) continue;
-    const lockedMember = await transaction.member.findFirst({ where: { id: candidate.memberId, organizationId, status: "active" } });
+    const lockedMember = await transaction.member.findFirst({ where: { id: candidate.memberId, organizationId, status: "active" }, include: { user: { select: { id: true, name: true, email: true } } } });
     if (!lockedMember) continue;
+    let lockedMembership: any = null;
     try {
-      await assertNoPendingMembershipFreeze(transaction, organizationId, lockedMembership.id);
       await assertParticipationAllowed(transaction, organizationId, candidate.memberId, classInstance.date, classInstance.locationId);
       await assertNoMemberServiceConflict(transaction, candidate.memberId, organizationId, classInstance);
-      const grant = await ensureMonthlyCreditGrant(transaction, lockedMembership, classInstance.date);
-      if (grant.allowance !== -1 && grant.remaining <= 0) {
-        // No usable credit: skipped, keeps the place in line (D6).
-        await transaction.classBooking.update({ where: { id: candidate.id }, data: { eligibilityReviewReason: "", history: appendHistory(candidate.history, historyEntry("skipped", { reason: "no usable credit" })) } });
-        continue;
-      }
+      const funding = await assertBookingRules(transaction, { organizationId, member: lockedMember, instance: classInstance, requireCredit: true, actorIsStaff: true });
+      lockedMembership = funding.membership;
     } catch (error) {
-      // Expected policy denials are visible to staff; infrastructure failures
-      // must abort instead of being silently acknowledged as ineligibility.
-      if (!(error instanceof Error) || !/Membership|membership|Service is outside|waiver|Waiver|closure|closed|participation|Adult age verification|Registered participant verification|overlapping private appointment|overlapping class/i.test(error.message)) throw error;
-      await transaction.classBooking.update({ where: { id: candidate.id }, data: { eligibilityReviewReason: error.message, history: appendHistory(candidate.history, historyEntry("skipped", { reason: error.message })) } });
+      // Expected policy denials skip the client (kept in line, visible to staff); infrastructure
+      // failures abort instead of being silently acknowledged as ineligibility.
+      if (!(error instanceof Error) || !/credit|Membership|membership|Service is outside|waiver|Waiver|closure|closed|participation|Adult age verification|Registered participant verification|overlapping private appointment|overlapping class|fee owed|intro class|a day|a month|off-peak|payment failed|Buy a class pack/i.test(error.message)) throw error;
+      await transaction.classBooking.update({ where: { id: candidate.id }, data: { eligibilityReviewReason: /credit|Buy a class pack/i.test(error.message) ? "" : error.message, history: appendHistory(candidate.history, historyEntry("skipped", { reason: error.message })) } });
       continue;
     }
     booking = candidate;
     membership = lockedMembership;
     break;
   }
-  if (!booking || !membership) {
+  if (!booking) {
     return { promoted: false, message: "No eligible members on waitlist" };
   }
 
@@ -524,7 +508,7 @@ export async function promoteCapacityControlledWaitlistBookingInTransaction(
       history: appendHistory(booking.history, historyEntry("promoted", { manual, spotId: spot?.id ?? null, spotLabel: spot?.label ?? null })),
     },
   });
-  await debitBookingCredit(transaction, membership, booking.id, classInstance.date);
+  await debitBookingCredit(transaction, membership, booking.id, classInstance.date, { memberId: booking.memberId, locationId: classInstance.locationId ?? null });
   const promotionNotice = await enqueueOperationalNotice(transaction, {
     organizationId,
     memberId: booking.memberId,

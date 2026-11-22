@@ -1,3 +1,4 @@
+import { periodInterval } from "./commercial-agreement";
 import Stripe from "stripe";
 import { newPaymentChargesEnabled } from "../../keystone/lib/stripe-environment-provider";
 import type { MembershipPriceValidationInput, PaymentProviderAdapter } from "./types";
@@ -42,7 +43,8 @@ export function assertStripeMembershipPrice(
   price: Stripe.Price,
   input: MembershipPriceValidationInput,
 ) {
-  const expectedInterval = input.billingCycle === "annual" ? "year" : "month";
+  const expected = periodInterval(input.billingCycle, input.billingPeriod);
+  const expectedInterval = expected.interval;
   const productId = typeof price.product === "string" ? price.product : price.product?.id;
   const productActive = Boolean(
     typeof price.product === "object" &&
@@ -56,13 +58,13 @@ export function assertStripeMembershipPrice(
     price.active &&
     price.type === "recurring" &&
     price.recurring?.interval === expectedInterval &&
-    price.recurring?.interval_count === 1 &&
+    price.recurring?.interval_count === expected.count &&
     price.unit_amount === input.amount &&
     price.currency.toUpperCase() === input.currencyCode.toUpperCase() &&
     (!input.productId || productId === input.productId);
   if (!valid) {
     throw new Error(
-      `Stripe ${input.billingCycle} Price must be active, recurring once per ${expectedInterval}, and match the configured plan amount, currency, and product.`,
+      `Stripe ${input.billingCycle} Price must be active, recurring every ${expected.count} ${expectedInterval}, and match the configured plan amount, currency, and product.`,
     );
   }
 }
@@ -187,10 +189,11 @@ export const stripePaymentProviderAdapter: PaymentProviderAdapter = {
     return { id: intent.id, clientSecret: intent.client_secret };
   },
 
-  cancelSubscriptionAtPeriodEnd(subscriptionId, idempotencyKey) {
+  cancelSubscriptionAtPeriodEnd(subscriptionId, idempotencyKey, cancelAt) {
+    // With a notice date (D10) the subscription ends on that date; otherwise at the paid period end.
     return getStripeClient().subscriptions.update(
       subscriptionId,
-      { cancel_at_period_end: true },
+      cancelAt ? { cancel_at: Math.floor(cancelAt.getTime() / 1000), proration_behavior: "none" } : { cancel_at_period_end: true },
       idempotencyKey ? { idempotencyKey } : undefined,
     );
   },

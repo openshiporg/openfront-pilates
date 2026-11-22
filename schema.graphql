@@ -211,6 +211,429 @@ input RoomRelateToOneForCreateInput {
   connect: RoomWhereUniqueInput
 }
 
+type ClassPack {
+  id: ID!
+  organization: Organization
+  name: String
+  description: String
+  kind: String
+  quantity: Int
+  price: Int
+  validDays: Int
+  introOnly: Boolean
+  firstTimersOnly: Boolean
+  activatesOn: String
+  locations(where: LocationWhereInput! = {}, orderBy: [LocationOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: LocationWhereUniqueInput): [Location!]
+  locationsCount(where: LocationWhereInput! = {}): Int
+  sortOrder: Int
+  isActive: Boolean
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input ClassPackWhereUniqueInput {
+  id: ID
+}
+
+input ClassPackWhereInput {
+  AND: [ClassPackWhereInput!]
+  OR: [ClassPackWhereInput!]
+  NOT: [ClassPackWhereInput!]
+  id: IDFilter
+  organization: OrganizationWhereInput
+  name: StringFilter
+  description: StringFilter
+  kind: StringFilter
+  quantity: IntFilter
+  price: IntFilter
+  validDays: IntFilter
+  introOnly: BooleanFilter
+  firstTimersOnly: BooleanFilter
+  activatesOn: StringFilter
+  locations: LocationManyRelationFilter
+  sortOrder: IntNullableFilter
+  isActive: BooleanFilter
+  createdAt: DateTimeFilter
+  updatedAt: DateTimeFilter
+}
+
+input LocationManyRelationFilter {
+  every: LocationWhereInput
+  some: LocationWhereInput
+  none: LocationWhereInput
+}
+
+input IntNullableFilter {
+  equals: Int
+  in: [Int!]
+  notIn: [Int!]
+  lt: Int
+  lte: Int
+  gt: Int
+  gte: Int
+  not: IntNullableFilter
+}
+
+input ClassPackOrderByInput {
+  id: OrderDirection
+  name: OrderDirection
+  description: OrderDirection
+  kind: OrderDirection
+  quantity: OrderDirection
+  price: OrderDirection
+  validDays: OrderDirection
+  introOnly: OrderDirection
+  firstTimersOnly: OrderDirection
+  activatesOn: OrderDirection
+  sortOrder: OrderDirection
+  isActive: OrderDirection
+  createdAt: OrderDirection
+  updatedAt: OrderDirection
+}
+
+input ClassPackUpdateInput {
+  organization: OrganizationRelateToOneForUpdateInput
+  name: String
+  description: String
+  kind: String
+  quantity: Int
+  price: Int
+  validDays: Int
+  introOnly: Boolean
+  firstTimersOnly: Boolean
+  activatesOn: String
+  locations: LocationRelateToManyForUpdateInput
+  sortOrder: Int
+  isActive: Boolean
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input LocationRelateToManyForUpdateInput {
+  disconnect: [LocationWhereUniqueInput!]
+  set: [LocationWhereUniqueInput!]
+  create: [LocationCreateInput!]
+  connect: [LocationWhereUniqueInput!]
+}
+
+input ClassPackUpdateArgs {
+  where: ClassPackWhereUniqueInput!
+  data: ClassPackUpdateInput!
+}
+
+input ClassPackCreateInput {
+  organization: OrganizationRelateToOneForCreateInput
+  name: String
+  description: String
+  kind: String
+  quantity: Int
+  price: Int
+  validDays: Int
+  introOnly: Boolean
+  firstTimersOnly: Boolean
+  activatesOn: String
+  locations: LocationRelateToManyForCreateInput
+  sortOrder: Int
+  isActive: Boolean
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input LocationRelateToManyForCreateInput {
+  create: [LocationCreateInput!]
+  connect: [LocationWhereUniqueInput!]
+}
+
+type CreditGrant {
+  id: ID!
+  organization: Organization
+  member: Member
+  source: String
+  sourceKey: String
+  kind: String
+  classPack: ClassPack
+  membership: Membership
+  payment: Payment
+  quantity: Int
+  remaining: Int
+  validFrom: DateTime
+  expiresAt: DateTime
+  validDays: Int
+  status: String
+  priceSnapshot: JSON
+  note: String
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input CreditGrantWhereUniqueInput {
+  id: ID
+}
+
+input CreditGrantWhereInput {
+  AND: [CreditGrantWhereInput!]
+  OR: [CreditGrantWhereInput!]
+  NOT: [CreditGrantWhereInput!]
+  id: IDFilter
+  organization: OrganizationWhereInput
+  member: MemberWhereInput
+  source: StringFilter
+  sourceKey: StringFilter
+  kind: StringFilter
+  classPack: ClassPackWhereInput
+  membership: MembershipWhereInput
+  payment: PaymentWhereInput
+  quantity: IntFilter
+  remaining: IntFilter
+  validFrom: DateTimeFilter
+  expiresAt: DateTimeNullableFilter
+  validDays: IntNullableFilter
+  status: StringFilter
+  note: StringFilter
+  createdAt: DateTimeFilter
+  updatedAt: DateTimeFilter
+}
+
+input CreditGrantOrderByInput {
+  id: OrderDirection
+  source: OrderDirection
+  sourceKey: OrderDirection
+  kind: OrderDirection
+  quantity: OrderDirection
+  remaining: OrderDirection
+  validFrom: OrderDirection
+  expiresAt: OrderDirection
+  validDays: OrderDirection
+  status: OrderDirection
+  note: OrderDirection
+  createdAt: OrderDirection
+  updatedAt: OrderDirection
+}
+
+input CreditGrantUpdateInput {
+  organization: OrganizationRelateToOneForUpdateInput
+  member: MemberRelateToOneForUpdateInput
+  source: String
+  sourceKey: String
+  kind: String
+  classPack: ClassPackRelateToOneForUpdateInput
+  membership: MembershipRelateToOneForUpdateInput
+  payment: PaymentRelateToOneForUpdateInput
+  quantity: Int
+  remaining: Int
+  validFrom: DateTime
+  expiresAt: DateTime
+  validDays: Int
+  status: String
+  priceSnapshot: JSON
+  note: String
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input MemberRelateToOneForUpdateInput {
+  create: MemberCreateInput
+  connect: MemberWhereUniqueInput
+  disconnect: Boolean
+}
+
+input ClassPackRelateToOneForUpdateInput {
+  create: ClassPackCreateInput
+  connect: ClassPackWhereUniqueInput
+  disconnect: Boolean
+}
+
+input MembershipRelateToOneForUpdateInput {
+  create: MembershipCreateInput
+  connect: MembershipWhereUniqueInput
+  disconnect: Boolean
+}
+
+input PaymentRelateToOneForUpdateInput {
+  create: PaymentCreateInput
+  connect: PaymentWhereUniqueInput
+  disconnect: Boolean
+}
+
+input CreditGrantUpdateArgs {
+  where: CreditGrantWhereUniqueInput!
+  data: CreditGrantUpdateInput!
+}
+
+input CreditGrantCreateInput {
+  organization: OrganizationRelateToOneForCreateInput
+  member: MemberRelateToOneForCreateInput
+  source: String
+  sourceKey: String
+  kind: String
+  classPack: ClassPackRelateToOneForCreateInput
+  membership: MembershipRelateToOneForCreateInput
+  payment: PaymentRelateToOneForCreateInput
+  quantity: Int
+  remaining: Int
+  validFrom: DateTime
+  expiresAt: DateTime
+  validDays: Int
+  status: String
+  priceSnapshot: JSON
+  note: String
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input MemberRelateToOneForCreateInput {
+  create: MemberCreateInput
+  connect: MemberWhereUniqueInput
+}
+
+input ClassPackRelateToOneForCreateInput {
+  create: ClassPackCreateInput
+  connect: ClassPackWhereUniqueInput
+}
+
+input MembershipRelateToOneForCreateInput {
+  create: MembershipCreateInput
+  connect: MembershipWhereUniqueInput
+}
+
+input PaymentRelateToOneForCreateInput {
+  create: PaymentCreateInput
+  connect: PaymentWhereUniqueInput
+}
+
+type CreditEntry {
+  id: ID!
+  organization: Organization
+  member: Member
+  grant: CreditGrant
+  eventKey: String
+  kind: String
+  delta: Int
+  balanceAfter: Int
+  booking: ClassBooking
+  appointment: Appointment
+  actor: User
+  reason: String
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input CreditEntryWhereUniqueInput {
+  id: ID
+}
+
+input CreditEntryWhereInput {
+  AND: [CreditEntryWhereInput!]
+  OR: [CreditEntryWhereInput!]
+  NOT: [CreditEntryWhereInput!]
+  id: IDFilter
+  organization: OrganizationWhereInput
+  member: MemberWhereInput
+  grant: CreditGrantWhereInput
+  eventKey: StringFilter
+  kind: StringFilter
+  delta: IntFilter
+  balanceAfter: IntFilter
+  booking: ClassBookingWhereInput
+  appointment: AppointmentWhereInput
+  actor: UserWhereInput
+  reason: StringFilter
+  createdAt: DateTimeFilter
+  updatedAt: DateTimeFilter
+}
+
+input CreditEntryOrderByInput {
+  id: OrderDirection
+  eventKey: OrderDirection
+  kind: OrderDirection
+  delta: OrderDirection
+  balanceAfter: OrderDirection
+  reason: OrderDirection
+  createdAt: OrderDirection
+  updatedAt: OrderDirection
+}
+
+input CreditEntryUpdateInput {
+  organization: OrganizationRelateToOneForUpdateInput
+  member: MemberRelateToOneForUpdateInput
+  grant: CreditGrantRelateToOneForUpdateInput
+  eventKey: String
+  kind: String
+  delta: Int
+  balanceAfter: Int
+  booking: ClassBookingRelateToOneForUpdateInput
+  appointment: AppointmentRelateToOneForUpdateInput
+  actor: UserRelateToOneForUpdateInput
+  reason: String
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input CreditGrantRelateToOneForUpdateInput {
+  create: CreditGrantCreateInput
+  connect: CreditGrantWhereUniqueInput
+  disconnect: Boolean
+}
+
+input ClassBookingRelateToOneForUpdateInput {
+  create: ClassBookingCreateInput
+  connect: ClassBookingWhereUniqueInput
+  disconnect: Boolean
+}
+
+input AppointmentRelateToOneForUpdateInput {
+  create: AppointmentCreateInput
+  connect: AppointmentWhereUniqueInput
+  disconnect: Boolean
+}
+
+input UserRelateToOneForUpdateInput {
+  create: UserCreateInput
+  connect: UserWhereUniqueInput
+  disconnect: Boolean
+}
+
+input CreditEntryUpdateArgs {
+  where: CreditEntryWhereUniqueInput!
+  data: CreditEntryUpdateInput!
+}
+
+input CreditEntryCreateInput {
+  organization: OrganizationRelateToOneForCreateInput
+  member: MemberRelateToOneForCreateInput
+  grant: CreditGrantRelateToOneForCreateInput
+  eventKey: String
+  kind: String
+  delta: Int
+  balanceAfter: Int
+  booking: ClassBookingRelateToOneForCreateInput
+  appointment: AppointmentRelateToOneForCreateInput
+  actor: UserRelateToOneForCreateInput
+  reason: String
+  createdAt: DateTime
+  updatedAt: DateTime
+}
+
+input CreditGrantRelateToOneForCreateInput {
+  create: CreditGrantCreateInput
+  connect: CreditGrantWhereUniqueInput
+}
+
+input ClassBookingRelateToOneForCreateInput {
+  create: ClassBookingCreateInput
+  connect: ClassBookingWhereUniqueInput
+}
+
+input AppointmentRelateToOneForCreateInput {
+  create: AppointmentCreateInput
+  connect: AppointmentWhereUniqueInput
+}
+
+input UserRelateToOneForCreateInput {
+  create: UserCreateInput
+  connect: UserWhereUniqueInput
+}
+
 type RetailItem {
   id: ID!
   organization: Organization
@@ -244,17 +667,6 @@ input RetailItemWhereInput {
   isActive: BooleanFilter
   createdAt: DateTimeFilter
   updatedAt: DateTimeFilter
-}
-
-input IntNullableFilter {
-  equals: Int
-  in: [Int!]
-  notIn: [Int!]
-  lt: Int
-  lte: Int
-  gt: Int
-  gte: Int
-  not: IntNullableFilter
 }
 
 input RetailItemOrderByInput {
@@ -380,12 +792,6 @@ input RetailSaleUpdateInput {
   updatedAt: DateTime
 }
 
-input UserRelateToOneForUpdateInput {
-  create: UserCreateInput
-  connect: UserWhereUniqueInput
-  disconnect: Boolean
-}
-
 input RetailSaleUpdateArgs {
   where: RetailSaleWhereUniqueInput!
   data: RetailSaleUpdateInput!
@@ -405,11 +811,6 @@ input RetailSaleCreateInput {
   recordedBy: UserRelateToOneForCreateInput
   createdAt: DateTime
   updatedAt: DateTime
-}
-
-input UserRelateToOneForCreateInput {
-  create: UserCreateInput
-  connect: UserWhereUniqueInput
 }
 
 type RetailReturn {
@@ -1021,12 +1422,6 @@ input MemberImportRecordUpdateInput {
   updatedAt: DateTime
 }
 
-input MemberRelateToOneForUpdateInput {
-  create: MemberCreateInput
-  connect: MemberWhereUniqueInput
-  disconnect: Boolean
-}
-
 input MemberImportRecordUpdateArgs {
   where: MemberImportRecordWhereUniqueInput!
   data: MemberImportRecordUpdateInput!
@@ -1044,11 +1439,6 @@ input MemberImportRecordCreateInput {
   completedAt: DateTime
   createdAt: DateTime
   updatedAt: DateTime
-}
-
-input MemberRelateToOneForCreateInput {
-  create: MemberCreateInput
-  connect: MemberWhereUniqueInput
 }
 
 type TrainingPackage {
@@ -1243,12 +1633,6 @@ input TrainingPackageRelateToOneForUpdateInput {
   disconnect: Boolean
 }
 
-input AppointmentRelateToOneForUpdateInput {
-  create: AppointmentCreateInput
-  connect: AppointmentWhereUniqueInput
-  disconnect: Boolean
-}
-
 input TrainingCreditEntryUpdateArgs {
   where: TrainingCreditEntryWhereUniqueInput!
   data: TrainingCreditEntryUpdateInput!
@@ -1271,11 +1655,6 @@ input TrainingCreditEntryCreateInput {
 input TrainingPackageRelateToOneForCreateInput {
   create: TrainingPackageCreateInput
   connect: TrainingPackageWhereUniqueInput
-}
-
-input AppointmentRelateToOneForCreateInput {
-  create: AppointmentCreateInput
-  connect: AppointmentWhereUniqueInput
 }
 
 type ContactMessage {
@@ -1503,181 +1882,6 @@ input GiftCardCreateInput {
 input PaymentSessionRelateToOneForCreateInput {
   create: PaymentSessionCreateInput
   connect: PaymentSessionWhereUniqueInput
-}
-
-type MembershipCreditGrant {
-  id: ID!
-  organization: Organization
-  key: String
-  membership: Membership
-  periodStart: DateTime
-  periodEnd: DateTime
-  allowance: Int
-  remaining: Int
-  createdAt: DateTime
-  updatedAt: DateTime
-}
-
-input MembershipCreditGrantWhereUniqueInput {
-  id: ID
-  key: String
-}
-
-input MembershipCreditGrantWhereInput {
-  AND: [MembershipCreditGrantWhereInput!]
-  OR: [MembershipCreditGrantWhereInput!]
-  NOT: [MembershipCreditGrantWhereInput!]
-  id: IDFilter
-  organization: OrganizationWhereInput
-  key: StringFilter
-  membership: MembershipWhereInput
-  periodStart: DateTimeFilter
-  periodEnd: DateTimeFilter
-  allowance: IntFilter
-  remaining: IntFilter
-  createdAt: DateTimeFilter
-  updatedAt: DateTimeFilter
-}
-
-input MembershipCreditGrantOrderByInput {
-  id: OrderDirection
-  key: OrderDirection
-  periodStart: OrderDirection
-  periodEnd: OrderDirection
-  allowance: OrderDirection
-  remaining: OrderDirection
-  createdAt: OrderDirection
-  updatedAt: OrderDirection
-}
-
-input MembershipCreditGrantUpdateInput {
-  organization: OrganizationRelateToOneForUpdateInput
-  key: String
-  membership: MembershipRelateToOneForUpdateInput
-  periodStart: DateTime
-  periodEnd: DateTime
-  allowance: Int
-  remaining: Int
-  createdAt: DateTime
-  updatedAt: DateTime
-}
-
-input MembershipRelateToOneForUpdateInput {
-  create: MembershipCreateInput
-  connect: MembershipWhereUniqueInput
-  disconnect: Boolean
-}
-
-input MembershipCreditGrantUpdateArgs {
-  where: MembershipCreditGrantWhereUniqueInput!
-  data: MembershipCreditGrantUpdateInput!
-}
-
-input MembershipCreditGrantCreateInput {
-  organization: OrganizationRelateToOneForCreateInput
-  key: String
-  membership: MembershipRelateToOneForCreateInput
-  periodStart: DateTime
-  periodEnd: DateTime
-  allowance: Int
-  remaining: Int
-  createdAt: DateTime
-  updatedAt: DateTime
-}
-
-input MembershipRelateToOneForCreateInput {
-  create: MembershipCreateInput
-  connect: MembershipWhereUniqueInput
-}
-
-type MembershipCreditEntry {
-  id: ID!
-  organization: Organization
-  key: String
-  grant: MembershipCreditGrant
-  booking: ClassBooking
-  delta: Int
-  kind: String
-  createdAt: DateTime
-  updatedAt: DateTime
-}
-
-input MembershipCreditEntryWhereUniqueInput {
-  id: ID
-  key: String
-}
-
-input MembershipCreditEntryWhereInput {
-  AND: [MembershipCreditEntryWhereInput!]
-  OR: [MembershipCreditEntryWhereInput!]
-  NOT: [MembershipCreditEntryWhereInput!]
-  id: IDFilter
-  organization: OrganizationWhereInput
-  key: StringFilter
-  grant: MembershipCreditGrantWhereInput
-  booking: ClassBookingWhereInput
-  delta: IntFilter
-  kind: StringFilter
-  createdAt: DateTimeFilter
-  updatedAt: DateTimeFilter
-}
-
-input MembershipCreditEntryOrderByInput {
-  id: OrderDirection
-  key: OrderDirection
-  delta: OrderDirection
-  kind: OrderDirection
-  createdAt: OrderDirection
-  updatedAt: OrderDirection
-}
-
-input MembershipCreditEntryUpdateInput {
-  organization: OrganizationRelateToOneForUpdateInput
-  key: String
-  grant: MembershipCreditGrantRelateToOneForUpdateInput
-  booking: ClassBookingRelateToOneForUpdateInput
-  delta: Int
-  kind: String
-  createdAt: DateTime
-  updatedAt: DateTime
-}
-
-input MembershipCreditGrantRelateToOneForUpdateInput {
-  create: MembershipCreditGrantCreateInput
-  connect: MembershipCreditGrantWhereUniqueInput
-  disconnect: Boolean
-}
-
-input ClassBookingRelateToOneForUpdateInput {
-  create: ClassBookingCreateInput
-  connect: ClassBookingWhereUniqueInput
-  disconnect: Boolean
-}
-
-input MembershipCreditEntryUpdateArgs {
-  where: MembershipCreditEntryWhereUniqueInput!
-  data: MembershipCreditEntryUpdateInput!
-}
-
-input MembershipCreditEntryCreateInput {
-  organization: OrganizationRelateToOneForCreateInput
-  key: String
-  grant: MembershipCreditGrantRelateToOneForCreateInput
-  booking: ClassBookingRelateToOneForCreateInput
-  delta: Int
-  kind: String
-  createdAt: DateTime
-  updatedAt: DateTime
-}
-
-input MembershipCreditGrantRelateToOneForCreateInput {
-  create: MembershipCreditGrantCreateInput
-  connect: MembershipCreditGrantWhereUniqueInput
-}
-
-input ClassBookingRelateToOneForCreateInput {
-  create: ClassBookingCreateInput
-  connect: ClassBookingWhereUniqueInput
 }
 
 type OperationalNotice {
@@ -2294,12 +2498,6 @@ input InstructorManyRelationFilter {
   none: InstructorWhereInput
 }
 
-input LocationManyRelationFilter {
-  every: LocationWhereInput
-  some: LocationWhereInput
-  none: LocationWhereInput
-}
-
 input RoomManyRelationFilter {
   every: RoomWhereInput
   some: RoomWhereInput
@@ -2508,13 +2706,6 @@ input InstructorRelateToManyForUpdateInput {
   set: [InstructorWhereUniqueInput!]
   create: [InstructorCreateInput!]
   connect: [InstructorWhereUniqueInput!]
-}
-
-input LocationRelateToManyForUpdateInput {
-  disconnect: [LocationWhereUniqueInput!]
-  set: [LocationWhereUniqueInput!]
-  create: [LocationCreateInput!]
-  connect: [LocationWhereUniqueInput!]
 }
 
 input RoomRelateToManyForUpdateInput {
@@ -2732,11 +2923,6 @@ input MemberRelateToManyForCreateInput {
 input InstructorRelateToManyForCreateInput {
   create: [InstructorCreateInput!]
   connect: [InstructorWhereUniqueInput!]
-}
-
-input LocationRelateToManyForCreateInput {
-  create: [LocationCreateInput!]
-  connect: [LocationWhereUniqueInput!]
 }
 
 input RoomRelateToManyForCreateInput {
@@ -3326,6 +3512,18 @@ type MembershipTier {
   personalTrainingSessions: Int
   freezeAllowed: Boolean
   contractLength: Int
+  billingPeriod: String
+  maxBookingsPerDay: Int
+  maxBookingsPerMonth: Int
+  cancelNoticeDays: Int
+  freezeMinDays: Int
+  freezeMaxDays: Int
+  freezeDaysPerYear: Int
+  freezeFee: Int
+  advanceBookingDays: Int
+  offPeakOnly: Boolean
+  offPeakWindows: JSON
+  rolloverPeriods: Int
   stripeMonthlyPriceId: String
   stripeAnnualPriceId: String
   stripeProductId: String
@@ -3364,6 +3562,17 @@ input MembershipTierWhereInput {
   personalTrainingSessions: IntNullableFilter
   freezeAllowed: BooleanFilter
   contractLength: IntNullableFilter
+  billingPeriod: StringFilter
+  maxBookingsPerDay: IntNullableFilter
+  maxBookingsPerMonth: IntNullableFilter
+  cancelNoticeDays: IntNullableFilter
+  freezeMinDays: IntNullableFilter
+  freezeMaxDays: IntNullableFilter
+  freezeDaysPerYear: IntNullableFilter
+  freezeFee: IntNullableFilter
+  advanceBookingDays: IntNullableFilter
+  offPeakOnly: BooleanFilter
+  rolloverPeriods: IntNullableFilter
   stripeMonthlyPriceId: StringFilter
   stripeAnnualPriceId: StringFilter
   stripeProductId: StringFilter
@@ -3399,6 +3608,17 @@ input MembershipTierOrderByInput {
   personalTrainingSessions: OrderDirection
   freezeAllowed: OrderDirection
   contractLength: OrderDirection
+  billingPeriod: OrderDirection
+  maxBookingsPerDay: OrderDirection
+  maxBookingsPerMonth: OrderDirection
+  cancelNoticeDays: OrderDirection
+  freezeMinDays: OrderDirection
+  freezeMaxDays: OrderDirection
+  freezeDaysPerYear: OrderDirection
+  freezeFee: OrderDirection
+  advanceBookingDays: OrderDirection
+  offPeakOnly: OrderDirection
+  rolloverPeriods: OrderDirection
   stripeMonthlyPriceId: OrderDirection
   stripeAnnualPriceId: OrderDirection
   stripeProductId: OrderDirection
@@ -3423,6 +3643,18 @@ input MembershipTierUpdateInput {
   personalTrainingSessions: Int
   freezeAllowed: Boolean
   contractLength: Int
+  billingPeriod: String
+  maxBookingsPerDay: Int
+  maxBookingsPerMonth: Int
+  cancelNoticeDays: Int
+  freezeMinDays: Int
+  freezeMaxDays: Int
+  freezeDaysPerYear: Int
+  freezeFee: Int
+  advanceBookingDays: Int
+  offPeakOnly: Boolean
+  offPeakWindows: JSON
+  rolloverPeriods: Int
   stripeMonthlyPriceId: String
   stripeAnnualPriceId: String
   stripeProductId: String
@@ -3454,6 +3686,18 @@ input MembershipTierCreateInput {
   personalTrainingSessions: Int
   freezeAllowed: Boolean
   contractLength: Int
+  billingPeriod: String
+  maxBookingsPerDay: Int
+  maxBookingsPerMonth: Int
+  cancelNoticeDays: Int
+  freezeMinDays: Int
+  freezeMaxDays: Int
+  freezeDaysPerYear: Int
+  freezeFee: Int
+  advanceBookingDays: Int
+  offPeakOnly: Boolean
+  offPeakWindows: JSON
+  rolloverPeriods: Int
   stripeMonthlyPriceId: String
   stripeAnnualPriceId: String
   stripeProductId: String
@@ -5955,12 +6199,6 @@ input AppointmentUpdateInput {
   updatedAt: DateTime
 }
 
-input PaymentRelateToOneForUpdateInput {
-  create: PaymentCreateInput
-  connect: PaymentWhereUniqueInput
-  disconnect: Boolean
-}
-
 input AppointmentUpdateArgs {
   where: AppointmentWhereUniqueInput!
   data: AppointmentUpdateInput!
@@ -5994,11 +6232,6 @@ input AppointmentCreateInput {
   resourceEndsAt: DateTime
   createdAt: DateTime
   updatedAt: DateTime
-}
-
-input PaymentRelateToOneForCreateInput {
-  create: PaymentCreateInput
-  connect: PaymentWhereUniqueInput
 }
 
 type OnboardingRun {
@@ -6359,6 +6592,24 @@ type Mutation {
   updateSpots(data: [SpotUpdateArgs!]!): [Spot]
   deleteSpot(where: SpotWhereUniqueInput!): Spot
   deleteSpots(where: [SpotWhereUniqueInput!]!): [Spot]
+  createClassPack(data: ClassPackCreateInput!): ClassPack
+  createClassPacks(data: [ClassPackCreateInput!]!): [ClassPack]
+  updateClassPack(where: ClassPackWhereUniqueInput!, data: ClassPackUpdateInput!): ClassPack
+  updateClassPacks(data: [ClassPackUpdateArgs!]!): [ClassPack]
+  deleteClassPack(where: ClassPackWhereUniqueInput!): ClassPack
+  deleteClassPacks(where: [ClassPackWhereUniqueInput!]!): [ClassPack]
+  createCreditGrant(data: CreditGrantCreateInput!): CreditGrant
+  createCreditGrants(data: [CreditGrantCreateInput!]!): [CreditGrant]
+  updateCreditGrant(where: CreditGrantWhereUniqueInput!, data: CreditGrantUpdateInput!): CreditGrant
+  updateCreditGrants(data: [CreditGrantUpdateArgs!]!): [CreditGrant]
+  deleteCreditGrant(where: CreditGrantWhereUniqueInput!): CreditGrant
+  deleteCreditGrants(where: [CreditGrantWhereUniqueInput!]!): [CreditGrant]
+  createCreditEntry(data: CreditEntryCreateInput!): CreditEntry
+  createCreditEntries(data: [CreditEntryCreateInput!]!): [CreditEntry]
+  updateCreditEntry(where: CreditEntryWhereUniqueInput!, data: CreditEntryUpdateInput!): CreditEntry
+  updateCreditEntries(data: [CreditEntryUpdateArgs!]!): [CreditEntry]
+  deleteCreditEntry(where: CreditEntryWhereUniqueInput!): CreditEntry
+  deleteCreditEntries(where: [CreditEntryWhereUniqueInput!]!): [CreditEntry]
   createRetailItem(data: RetailItemCreateInput!): RetailItem
   createRetailItems(data: [RetailItemCreateInput!]!): [RetailItem]
   updateRetailItem(where: RetailItemWhereUniqueInput!, data: RetailItemUpdateInput!): RetailItem
@@ -6431,18 +6682,6 @@ type Mutation {
   updateGiftCards(data: [GiftCardUpdateArgs!]!): [GiftCard]
   deleteGiftCard(where: GiftCardWhereUniqueInput!): GiftCard
   deleteGiftCards(where: [GiftCardWhereUniqueInput!]!): [GiftCard]
-  createMembershipCreditGrant(data: MembershipCreditGrantCreateInput!): MembershipCreditGrant
-  createMembershipCreditGrants(data: [MembershipCreditGrantCreateInput!]!): [MembershipCreditGrant]
-  updateMembershipCreditGrant(where: MembershipCreditGrantWhereUniqueInput!, data: MembershipCreditGrantUpdateInput!): MembershipCreditGrant
-  updateMembershipCreditGrants(data: [MembershipCreditGrantUpdateArgs!]!): [MembershipCreditGrant]
-  deleteMembershipCreditGrant(where: MembershipCreditGrantWhereUniqueInput!): MembershipCreditGrant
-  deleteMembershipCreditGrants(where: [MembershipCreditGrantWhereUniqueInput!]!): [MembershipCreditGrant]
-  createMembershipCreditEntry(data: MembershipCreditEntryCreateInput!): MembershipCreditEntry
-  createMembershipCreditEntries(data: [MembershipCreditEntryCreateInput!]!): [MembershipCreditEntry]
-  updateMembershipCreditEntry(where: MembershipCreditEntryWhereUniqueInput!, data: MembershipCreditEntryUpdateInput!): MembershipCreditEntry
-  updateMembershipCreditEntries(data: [MembershipCreditEntryUpdateArgs!]!): [MembershipCreditEntry]
-  deleteMembershipCreditEntry(where: MembershipCreditEntryWhereUniqueInput!): MembershipCreditEntry
-  deleteMembershipCreditEntries(where: [MembershipCreditEntryWhereUniqueInput!]!): [MembershipCreditEntry]
   createOperationalNotice(data: OperationalNoticeCreateInput!): OperationalNotice
   createOperationalNotices(data: [OperationalNoticeCreateInput!]!): [OperationalNotice]
   updateOperationalNotice(where: OperationalNoticeWhereUniqueInput!, data: OperationalNoticeUpdateInput!): OperationalNotice
@@ -6720,6 +6959,9 @@ type Mutation {
   saveRoomLayout(roomId: ID!, layout: JSON!, spots: JSON!): JSON!
   setSpotOutOfService(spotId: ID!, outOfService: Boolean!, from: String, until: String, notes: String): JSON!
   promoteWaitlistBooking(bookingId: ID!, spotId: ID): JSON!
+  startPackCheckout(classPackId: ID!): PackCheckoutResult!
+  completePackCheckout(providerSessionId: String!): PackCompletionResult!
+  adjustCredits(memberId: ID!, grantId: ID, delta: Int!, reason: String!, kind: String, validDays: Int, idempotencyKey: String!): JSON!
   startGiftCardCheckout(amount: Int!, purchaserName: String!, purchaserEmail: String!, recipientName: String, recipientEmail: String, message: String): GiftCardCheckout!
   confirmGiftCardOrder(ref: ID!, token: String!): GiftCardOrder!
   redeemGiftCard(code: String!, amount: Int!, requestKey: String!, note: String!): JSON!
@@ -6761,6 +7003,15 @@ type Query {
   spot(where: SpotWhereUniqueInput!): Spot
   spots(where: SpotWhereInput! = {}, orderBy: [SpotOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: SpotWhereUniqueInput): [Spot!]
   spotsCount(where: SpotWhereInput! = {}): Int
+  classPack(where: ClassPackWhereUniqueInput!): ClassPack
+  classPacks(where: ClassPackWhereInput! = {}, orderBy: [ClassPackOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: ClassPackWhereUniqueInput): [ClassPack!]
+  classPacksCount(where: ClassPackWhereInput! = {}): Int
+  creditGrant(where: CreditGrantWhereUniqueInput!): CreditGrant
+  creditGrants(where: CreditGrantWhereInput! = {}, orderBy: [CreditGrantOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: CreditGrantWhereUniqueInput): [CreditGrant!]
+  creditGrantsCount(where: CreditGrantWhereInput! = {}): Int
+  creditEntry(where: CreditEntryWhereUniqueInput!): CreditEntry
+  creditEntries(where: CreditEntryWhereInput! = {}, orderBy: [CreditEntryOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: CreditEntryWhereUniqueInput): [CreditEntry!]
+  creditEntriesCount(where: CreditEntryWhereInput! = {}): Int
   retailItem(where: RetailItemWhereUniqueInput!): RetailItem
   retailItems(where: RetailItemWhereInput! = {}, orderBy: [RetailItemOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: RetailItemWhereUniqueInput): [RetailItem!]
   retailItemsCount(where: RetailItemWhereInput! = {}): Int
@@ -6797,12 +7048,6 @@ type Query {
   giftCard(where: GiftCardWhereUniqueInput!): GiftCard
   giftCards(where: GiftCardWhereInput! = {}, orderBy: [GiftCardOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: GiftCardWhereUniqueInput): [GiftCard!]
   giftCardsCount(where: GiftCardWhereInput! = {}): Int
-  membershipCreditGrant(where: MembershipCreditGrantWhereUniqueInput!): MembershipCreditGrant
-  membershipCreditGrants(where: MembershipCreditGrantWhereInput! = {}, orderBy: [MembershipCreditGrantOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: MembershipCreditGrantWhereUniqueInput): [MembershipCreditGrant!]
-  membershipCreditGrantsCount(where: MembershipCreditGrantWhereInput! = {}): Int
-  membershipCreditEntry(where: MembershipCreditEntryWhereUniqueInput!): MembershipCreditEntry
-  membershipCreditEntries(where: MembershipCreditEntryWhereInput! = {}, orderBy: [MembershipCreditEntryOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: MembershipCreditEntryWhereUniqueInput): [MembershipCreditEntry!]
-  membershipCreditEntriesCount(where: MembershipCreditEntryWhereInput! = {}): Int
   operationalNotice(where: OperationalNoticeWhereUniqueInput!): OperationalNotice
   operationalNotices(where: OperationalNoticeWhereInput! = {}, orderBy: [OperationalNoticeOrderByInput!]! = [], take: Int! = 5001, skip: Int! = 0, cursor: OperationalNoticeWhereUniqueInput): [OperationalNotice!]
   operationalNoticesCount(where: OperationalNoticeWhereInput! = {}): Int
@@ -6945,6 +7190,7 @@ type Query {
   retailSaleItems(locationId: ID!, q: String, skip: Int = 0): JSON!
   classAvailability(classInstanceId: ID!): JSON!
   roomsWorkspace: JSON!
+  myCredits(memberId: ID): JSON!
   giftCardOptions: GiftCardOptions!
   lookupGiftCard(code: String!): JSON!
   giftCardsWorkspace(skip: Int = 0): JSON!
@@ -7426,6 +7672,17 @@ type BookClassWithSpotResult {
   waitlistPosition: Int
   creditsRemaining: Int!
   message: String
+}
+
+type PackCheckoutResult {
+  id: ID!
+  checkoutUrl: String!
+  amount: Int!
+}
+
+type PackCompletionResult {
+  state: String!
+  grantId: ID
 }
 
 type GiftCardOptions {

@@ -1,11 +1,27 @@
 import { guardKeystonePrismaResults } from "./prisma-result";
 
-/** Called only inside the caller's member-locked transaction. No provider calls. */
+import { issueGrant, restoreCredit, spendCredit } from "./credits";
+
+const DAY = 86_400_000;
+
+/**
+ * The service period that contains `at`, inside the paid period [creditPeriodStart, creditPeriodEnd).
+ * Weekly, fortnightly and 4-weekly plans (D10) step by 7, 14 or 28 days from the paid start; monthly
+ * and annual plans step by calendar months. Called only inside the caller's member-locked transaction.
+ */
 export function monthlyServicePeriod(membership: any, at: Date) {
   const start = new Date(membership.creditPeriodStart || membership.startDate);
   const end = new Date(membership.creditPeriodEnd || membership.nextBillingDate);
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || at < start || at >= end) {
     throw new Error("Service is outside the paid membership period");
+  }
+  const period = membership.agreementSnapshot?.billingPeriod;
+  const stepDays = period === "week" ? 7 : period === "fortnight" ? 14 : period === "four_weeks" ? 28 : 0;
+  if (stepDays && membership.billingCycle !== "annual") {
+    const index = Math.floor((at.getTime() - start.getTime()) / (stepDays * DAY));
+    const periodStart = new Date(start.getTime() + index * stepDays * DAY);
+    const next = new Date(periodStart.getTime() + stepDays * DAY);
+    return { periodStart, periodEnd: next < end ? next : end };
   }
   const monthAt = (offset: number) => {
     const result = new Date(start);
@@ -42,75 +58,78 @@ export async function assertNoPendingMembershipFreeze(tx: any, organizationId: s
   if (attempt) throw new Error("Membership freeze is being finalized; participation is temporarily unavailable");
 }
 
+async function memberIdForMembership(tx: any, membership: any) {
+  const member = await tx.member.findFirst({ where: { organizationId: membership.organizationId, userId: membership.memberId }, select: { id: true } });
+  if (!member) throw new Error("Membership has no member profile");
+  return member.id as string;
+}
+
+/**
+ * The CreditGrant for the service period containing `at`: one per membership and period, created on
+ * first need (booking, renewal webhook, refresh) and found again on every replay. Returned in the
+ * shape callers used for the former monthly grant: { id, allowance, remaining, periodStart, periodEnd }.
+ */
 export async function ensureMonthlyCreditGrant(tx: any, membership: any, at: Date) {
   tx = guardKeystonePrismaResults(tx);
   assertMembershipServiceEligibility(membership, at);
   const { periodStart, periodEnd } = monthlyServicePeriod(membership, at);
   const allowance = membership.agreementSnapshot?.classCreditsPerMonth ?? membership.tier?.classCreditsPerMonth;
   if (!Number.isInteger(allowance) || allowance < -1) throw new Error("Membership credit allowance requires review");
-  const key = `${membership.id}:${periodStart.toISOString()}`;
-  const existing = await tx.membershipCreditGrant.findUnique({ where: { key } });
-  if (existing) return existing;
-  // Preserve the unspent balance of pre-ledger current-period memberships. Never
-  // manufacture a refund for a legacy booking whose debit source is unknown.
-  const anyGrant = await tx.membershipCreditGrant.findFirst({ where: { membershipId: membership.id } });
-  const now = new Date();
-  const preserveLegacyBalance = !anyGrant &&
-    membership.agreementSnapshot?.creditLedgerPolicy !== "monthly-grant-v1" &&
-    periodStart.getTime() === new Date(membership.creditPeriodStart || membership.startDate).getTime() &&
-    periodStart <= now && now < periodEnd;
-  // New checkout agreements explicitly opt into a spendable paid-period ledger.
-  // Only older agreements without that marker preserve the scalar balance as
-  // evidence for pre-ledger bookings.
-  const remaining = allowance === -1 ? -1 : preserveLegacyBalance
-    ? Math.min(Math.max(membership.classCreditsRemaining ?? 0, 0), Math.max(allowance, 0))
-    : allowance;
-  return tx.membershipCreditGrant.create({ data: {
-    key, organizationId: membership.organizationId, membershipId: membership.id,
-    periodStart, periodEnd, allowance, remaining,
-  } });
+  const memberId = await memberIdForMembership(tx, membership);
+  const sourceKey = `membership:${membership.id}:${periodStart.toISOString()}`;
+  let quantity = allowance;
+  if (allowance > 0 && Number(membership.agreementSnapshot?.rolloverPeriods ?? 0) >= 1) {
+    // Unused credits of the period just before roll over one period (D10), never more.
+    const previous = await tx.creditGrant.findFirst({ where: { organizationId: membership.organizationId, membershipId: membership.id, source: "membership_period", expiresAt: { lte: periodStart } }, orderBy: [{ expiresAt: "desc" }] });
+    const carried = previous && previous.remaining > 0 && previous.expiresAt.getTime() === periodStart.getTime() && !(previous.priceSnapshot as any)?.rolledOver ? Math.min(previous.remaining, allowance) : 0;
+    quantity = allowance + carried;
+  }
+  if (allowance === 0) return { id: null, allowance: 0, remaining: 0, periodStart, periodEnd };
+  const { grant } = await issueGrant(tx, {
+    organizationId: membership.organizationId, memberId, source: "membership_period", sourceKey, kind: "group",
+    quantity, validFrom: periodStart, expiresAt: periodEnd, membershipId: membership.id,
+    priceSnapshot: { tierId: membership.tierId ?? null, amount: membership.agreementSnapshot?.amount ?? null, billingPeriod: membership.agreementSnapshot?.billingPeriod ?? "month" },
+  });
+  return { ...grant, allowance: grant.quantity, periodStart, periodEnd };
 }
 
-export async function debitBookingCredit(tx: any, membership: any, bookingId: string, at: Date) {
+/** Spends one group credit for a booking: soonest expiry first across membership periods and packs. */
+export async function debitBookingCredit(tx: any, membership: any, bookingId: string, at: Date, options: { memberId?: string; locationId?: string | null } = {}) {
   tx = guardKeystonePrismaResults(tx);
-  const key = `${bookingId}:debit`;
-  const existing = await tx.membershipCreditEntry.findUnique({ where: { key } });
-  if (existing) return tx.membershipCreditGrant.findUnique({ where: { id: existing.grantId } });
-  const grant = await ensureMonthlyCreditGrant(tx, membership, at);
-  if (grant.allowance !== -1 && grant.remaining <= 0) throw new Error("No class credits remaining for this service month");
-  const amount = grant.allowance === -1 ? 0 : -1;
-  const updated = amount ? await tx.membershipCreditGrant.update({ where: { id: grant.id }, data: { remaining: { decrement: 1 } } }) : grant;
-  await tx.membershipCreditEntry.create({ data: {
-    key, organizationId: membership.organizationId, grantId: grant.id, bookingId, delta: amount, kind: "booking",
-  } });
-  await updateCurrentCreditDisplay(tx, membership.id);
-  return updated;
+  const booking = await tx.classBooking.findUnique({ where: { id: bookingId }, select: { organizationId: true, memberId: true } });
+  if (!booking) throw new Error("Booking not found");
+  if (membership) await ensureMonthlyCreditGrant(tx, membership, at);
+  const grant = await spendCredit(tx, { organizationId: booking.organizationId, memberId: options.memberId ?? booking.memberId, kind: "group", at, eventKey: `${bookingId}:debit`, bookingId, locationId: options.locationId });
+  if (membership) await updateCurrentCreditDisplay(tx, membership.id);
+  return grant;
 }
 
+/** Restores a booking's credit to the grant it came from, with that grant's expiry. */
 export async function restoreBookingCredit(tx: any, bookingId: string) {
   tx = guardKeystonePrismaResults(tx);
-  const debit = await tx.membershipCreditEntry.findUnique({ where: { key: `${bookingId}:debit` } });
+  const booking = await tx.classBooking.findUnique({ where: { id: bookingId }, select: { organizationId: true } });
+  if (!booking) return false;
+  const debit = await tx.creditEntry.findFirst({ where: { organizationId: booking.organizationId, eventKey: `${bookingId}:debit` } });
   if (!debit) {
-    await tx.classBooking.update({ where: { id: bookingId }, data: { eligibilityReviewReason: "Legacy booking has no credit provenance; staff must review any credit adjustment" } });
+    await tx.classBooking.update({ where: { id: bookingId }, data: { eligibilityReviewReason: "This booking has no credit record; staff must review any credit adjustment" } });
     return false;
   }
-  const key = `${bookingId}:restore`;
-  if (await tx.membershipCreditEntry.findUnique({ where: { key } })) return false;
-  const grant = await tx.membershipCreditGrant.findUnique({ where: { id: debit.grantId } });
-  if (!grant) throw new Error("Credit source grant is missing");
-  // A grant reset by a plan change can be unlimited or smaller than the debit's
-  // original allowance; a restoration never exceeds the grant's current allowance.
-  const restores = debit.delta < 0 && grant.allowance !== -1;
-  if (restores) await tx.membershipCreditGrant.update({ where: { id: grant.id }, data: { remaining: Math.min(grant.allowance, grant.remaining - debit.delta) } });
-  await tx.membershipCreditEntry.create({ data: { key, organizationId: grant.organizationId, grantId: grant.id, bookingId, delta: -debit.delta, kind: "restoration" } });
-  await updateCurrentCreditDisplay(tx, grant.membershipId);
-  return restores;
+  const restored = await restoreCredit(tx, booking.organizationId, `${bookingId}:debit`, `${bookingId}:restore`);
+  const grant = await tx.creditGrant.findUnique({ where: { id: debit.grantId }, select: { membershipId: true } });
+  if (grant?.membershipId) await updateCurrentCreditDisplay(tx, grant.membershipId);
+  return restored;
+}
+
+/** The grant a booking's credit came from (or null for a drop-in). */
+export async function bookingDebit(tx: any, organizationId: string, bookingId: string) {
+  tx = guardKeystonePrismaResults(tx);
+  const debit = await tx.creditEntry.findFirst({ where: { organizationId, eventKey: `${bookingId}:debit` }, include: { grant: true } });
+  return debit ?? null;
 }
 
 /**
- * Operator-reviewed plan change: the current service-month grant takes the new
- * plan allowance now (-1 is unlimited). Later months grant from the new agreement.
- * Called inside the caller's member-locked transaction.
+ * Operator-reviewed plan change: the current period's grant takes the new allowance now (-1 is
+ * unlimited). Later periods grant from the new agreement. Inside the member-locked transaction.
  */
 export async function applyPlanAllowanceToCurrentGrant(tx: any, membership: any, at: Date) {
   tx = guardKeystonePrismaResults(tx);
@@ -118,17 +137,20 @@ export async function applyPlanAllowanceToCurrentGrant(tx: any, membership: any,
   if (!Number.isInteger(allowance) || allowance < -1) throw new Error("Membership credit allowance requires review");
   let period: { periodStart: Date; periodEnd: Date };
   try { period = monthlyServicePeriod(membership, at); } catch { return null; }
-  const grant = await tx.membershipCreditGrant.findUnique({ where: { key: `${membership.id}:${period.periodStart.toISOString()}` } });
+  const grant = await tx.creditGrant.findFirst({ where: { organizationId: membership.organizationId, sourceKey: `membership:${membership.id}:${period.periodStart.toISOString()}` } });
   if (!grant) return null;
-  const updated = await tx.membershipCreditGrant.update({ where: { id: grant.id }, data: { allowance, remaining: allowance } });
+  const used = grant.remaining === -1 || grant.quantity === -1 ? 0 : grant.quantity - grant.remaining;
+  const remaining = allowance === -1 ? -1 : Math.max(allowance - used, 0);
+  const updated = await tx.creditGrant.update({ where: { id: grant.id }, data: { quantity: allowance === -1 ? -1 : Math.max(allowance, used), remaining } });
+  await tx.creditEntry.create({ data: { organizationId: grant.organizationId, memberId: grant.memberId, grantId: grant.id, eventKey: `${grant.id}:plan:${at.toISOString()}`, kind: "adjust", delta: remaining === -1 || grant.remaining === -1 ? 0 : remaining - grant.remaining, balanceAfter: remaining, reason: "Plan change" } });
   await updateCurrentCreditDisplay(tx, membership.id);
-  return updated;
+  return { ...updated, allowance: updated.quantity };
 }
 
 async function updateCurrentCreditDisplay(tx: any, membershipId: string) {
   tx = guardKeystonePrismaResults(tx);
   const now = new Date();
-  const current = await tx.membershipCreditGrant.findFirst({ where: { membershipId, periodStart: { lte: now }, periodEnd: { gt: now } }, orderBy: [{ periodStart: "desc" }, { createdAt: "desc" }] });
+  const current = await tx.creditGrant.findFirst({ where: { membershipId, source: "membership_period", validFrom: { lte: now }, expiresAt: { gt: now } }, orderBy: [{ validFrom: "desc" }, { createdAt: "desc" }] });
   if (current) await tx.membership.update({ where: { id: membershipId }, data: { classCreditsRemaining: current.remaining } });
 }
 

@@ -65,6 +65,49 @@ function billingAttemptScope(
   };
 }
 
+export function freezeRule(membership: any) {
+  const terms = membership.agreementSnapshot ?? {};
+  const tier = membership.tier ?? {};
+  return {
+    minDays: Number(terms.freezeMinDays ?? tier.freezeMinDays ?? 7),
+    maxDays: Number(terms.freezeMaxDays ?? tier.freezeMaxDays ?? 30),
+    daysPerYear: Number(terms.freezeDaysPerYear ?? tier.freezeDaysPerYear ?? 30),
+  };
+}
+
+/** Frozen days in the 365 days before `at`, from the agreement history and the current freeze. */
+export function frozenDaysInLastYear(membership: any, at: Date) {
+  const since = at.getTime() - 365 * 86_400_000;
+  const periods: Array<{ start: number; end: number }> = [];
+  for (const entry of Array.isArray(membership.agreementHistory) ? membership.agreementHistory : []) {
+    if (entry?.kind === "freeze" && entry.start && entry.end) periods.push({ start: new Date(entry.start).getTime(), end: new Date(entry.end).getTime() });
+  }
+  if (membership.freezeStartDate && membership.freezeEndDate) periods.push({ start: new Date(membership.freezeStartDate).getTime(), end: new Date(membership.freezeEndDate).getTime() });
+  const seen = new Set<string>();
+  let total = 0;
+  for (const p of periods) {
+    const key = `${p.start}:${p.end}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    total += Math.max(0, Math.min(p.end, at.getTime()) - Math.max(p.start, since)) / 86_400_000;
+  }
+  return Math.ceil(total);
+}
+
+/**
+ * When a cancel given now takes effect (D10, W7.6): the later of the notice date and the minimum
+ * term end, rounded up to the end of the paid period it falls in.
+ */
+export function cancellationEndDate(membership: any, now = new Date()) {
+  const noticeDays = Number(membership.agreementSnapshot?.cancelNoticeDays ?? membership.tier?.cancelNoticeDays ?? 0);
+  const notice = new Date(now.getTime() + Math.max(noticeDays, 0) * 86_400_000);
+  const term = minimumTermEnd(membership);
+  const target = term && term > notice ? term : notice;
+  const paidEnd = membership.nextBillingDate ? new Date(membership.nextBillingDate) : null;
+  if (paidEnd && target <= paidEnd) return paidEnd;
+  return target;
+}
+
 /**
  * The minimum term the member accepted (agreementSnapshot.contractLength, in months from the
  * start date). Renewal can't be cancelled inside it; staff can still end a membership now.
@@ -129,8 +172,7 @@ export async function cancelMembership(
   if (["cancelled", "expired"].includes(membership.status)) throw new Error(`Membership is already ${membership.status}`);
   if (!membership.autoRenew) throw new Error("Membership renewal is already cancelled");
   // Staff may waive the term; a member cancelling their own plan is held to it.
-  const termProblem = actor.canManageAllRecords ? null : minimumTermCancelProblem(membership);
-  if (termProblem) throw new Error(termProblem);
+  // The minimum term is shown and honoured through the end date (D10), not refused.
   if (!membership.stripeSubscriptionId) throw new Error("Membership has no active Stripe subscription");
   const attempt = await claimMembershipBillingAttempt(context, scope, {
     status: membership.status,
@@ -142,20 +184,26 @@ export async function cancelMembership(
   try {
     const { adapter } = await getAdapter(context, organizationId);
     providerExecutionStarted = true;
+    // Notice applies (W7.6): the membership ends on the later of the notice date and the term end.
+    const endsOn = cancellationEndDate(membership);
+    const paidEnd = membership.nextBillingDate ? new Date(membership.nextBillingDate) : null;
     const providerSubscription = await adapter.cancelSubscriptionAtPeriodEnd(
       membership.stripeSubscriptionId,
       attempt.providerIdempotencyKey,
+      paidEnd && endsOn.getTime() === paidEnd.getTime() ? null : endsOn,
     );
-    const providerPeriodEnd = providerSubscription.current_period_end
-      ? new Date(providerSubscription.current_period_end * 1000)
-      : membership.nextBillingDate ? new Date(membership.nextBillingDate) : null;
+    const providerPeriodEnd = (providerSubscription as any).cancel_at
+      ? new Date((providerSubscription as any).cancel_at * 1000)
+      : providerSubscription.current_period_end
+        ? new Date(providerSubscription.current_period_end * 1000)
+        : endsOn;
     await finishMembershipBillingAttempt(context, attempt, {
       autoRenew: false,
       nextBillingDate: providerPeriodEnd,
       cancelReason: normalizedReason,
       cancelledAt: null,
     });
-    return { membership: await currentMembership(context, membershipId), message: "Membership renewal cancelled at the end of the paid period" };
+    return { membership: await currentMembership(context, membershipId), message: `Membership ends on ${providerPeriodEnd.toISOString().slice(0, 10)}; classes can be booked until then` };
   } catch (error) {
     // After the provider call starts, a lost response does not prove failure: keep the attempt
     // pending so the same key reconciles it before any other billing change.
@@ -250,9 +298,13 @@ export async function freezeMembership(
   if (!(membership.agreementSnapshot?.freezeAllowed ?? membership.tier?.freezeAllowed)) throw new Error("This membership tier does not allow freezes");
   if (!membership.stripeSubscriptionId) throw new Error("Membership has no active Stripe subscription");
   const startsAt = new Date();
-  const maximumEnd = new Date(startsAt.getTime() + 365 * 24 * 60 * 60 * 1000);
   if (endsAt <= startsAt) throw new Error("Freeze end date must be in the future");
-  if (endsAt > maximumEnd) throw new Error("Freeze duration cannot exceed one year");
+  // D10 freeze rule from the accepted agreement: 7 to 30 days a time, at most N days a year.
+  const rule = freezeRule(membership);
+  const days = Math.ceil((endsAt.getTime() - startsAt.getTime()) / 86_400_000);
+  if (days < rule.minDays || days > rule.maxDays) throw new Error(`A freeze is ${rule.minDays} to ${rule.maxDays} days`);
+  const usedThisYear = frozenDaysInLastYear(membership, startsAt);
+  if (usedThisYear + days > rule.daysPerYear) throw new Error(`Your plan allows ${rule.daysPerYear} frozen days a year; ${Math.max(rule.daysPerYear - usedThisYear, 0)} are left`);
   const attempt = await claimMembershipBillingAttempt(context, scope, {
     status: membership.status,
     autoRenew: membership.autoRenew,
@@ -276,7 +328,8 @@ export async function freezeMembership(
     await failMembershipBillingAttempt(context, attempt, error, "unknown");
     throw error;
   }
-  await finishMembershipBillingAttempt(context, attempt, { status: "frozen", freezeStartDate: startsAt, freezeEndDate: endsAt });
+  const history = Array.isArray(membership.agreementHistory) ? membership.agreementHistory : [];
+  await finishMembershipBillingAttempt(context, attempt, { status: "frozen", freezeStartDate: startsAt, freezeEndDate: endsAt, agreementHistory: [...history, { kind: "freeze", start: startsAt.toISOString(), end: endsAt.toISOString(), at: startsAt.toISOString() }] } as any);
   return { membership: await currentMembership(context, membershipId), message: "Membership frozen immediately" };
 }
 
@@ -386,6 +439,7 @@ export async function changeMembershipTier(
       amount: tierAmountMinor(newTier, membership.billingCycle),
       currencyCode: contractCurrency,
       billingCycle: membership.billingCycle === "annual" ? "annual" : "monthly",
+      billingPeriod: membership.billingCycle === "annual" ? null : newTier.billingPeriod ?? "month",
     });
     providerExecutionStarted = true;
     await adapter.changeSubscriptionPrice(

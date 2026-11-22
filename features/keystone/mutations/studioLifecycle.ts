@@ -348,9 +348,12 @@ export async function markCapacityControlledAttendance(
         // An operator may record yesterday's attendance after a monthly renewal.
         // The immutable debit lot proves that historical service was paid; it
         // never grants access to a suspended/frozen member or an unfunded date.
-        const debit = await transaction.membershipCreditEntry.findUnique({ where: { key: `${booking.id}:debit` }, include: { grant: true } });
+        // A booking paid from a pack, intro or comp grant needs no membership at all.
+        const debit = await transaction.creditEntry.findFirst({ where: { organizationId: input.actor.organizationId, eventKey: `${booking.id}:debit` }, include: { grant: true } });
         const membership = currentMember.user?.membership;
-        if (membership?.status !== "active" || !(error instanceof Error) || error.message !== "Service is outside the paid membership period" || debit?.grant?.membershipId !== membership.id || booking.classInstance.date < debit.grant.periodStart || booking.classInstance.date >= debit.grant.periodEnd) throw error;
+        const fromNonMembershipGrant = Boolean(debit?.grant && debit.grant.source !== "membership_period");
+        const fromThisPeriod = Boolean(debit?.grant?.membershipId && membership?.status === "active" && debit.grant.membershipId === membership.id && booking.classInstance.date >= debit.grant.validFrom && (!debit.grant.expiresAt || booking.classInstance.date < debit.grant.expiresAt));
+        if (!fromNonMembershipGrant && !(fromThisPeriod && error instanceof Error && error.message === "Service is outside the paid membership period")) throw error;
       }
       await assertParticipationAllowed(transaction, input.actor.organizationId!, booking.memberId, booking.classInstance.date, booking.classInstance.locationId);
     }

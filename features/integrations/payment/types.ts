@@ -23,6 +23,8 @@ export type MembershipPriceValidationInput = {
   amount: number;
   currencyCode: string;
   billingCycle: BillingCycle;
+  /** D10 period of a "monthly" price: week, fortnight, four_weeks or month. */
+  billingPeriod?: string | null;
 };
 
 /** One-off hosted card payment for a staffed counter sale (retail or a private session pack). */
@@ -62,7 +64,7 @@ export interface PaymentProviderAdapter {
   retrieveCounterCheckout?(providerSessionId: string): Promise<Stripe.Checkout.Session>;
   expireCounterCheckout?(providerSessionId: string): Promise<Stripe.Checkout.Session>;
   createSetupIntent(customerId: string): Promise<{ id: string; clientSecret: string | null }>;
-  cancelSubscriptionAtPeriodEnd(subscriptionId: string, idempotencyKey?: string): Promise<Stripe.Subscription>;
+  cancelSubscriptionAtPeriodEnd(subscriptionId: string, idempotencyKey?: string, cancelAt?: Date | null): Promise<Stripe.Subscription>;
   cancelSubscriptionNow(subscriptionId: string, idempotencyKey?: string): Promise<Stripe.Subscription>;
   pauseSubscription(subscriptionId: string, resumeDate?: Date, idempotencyKey?: string): Promise<Stripe.Subscription>;
   resumeSubscription(subscriptionId: string, idempotencyKey?: string): Promise<Stripe.Subscription>;

@@ -188,8 +188,9 @@ function listOf(items: string[]) {
 function creditLine(booked: any) {
   const credit = booked?.credit;
   if (credit?.basis === "drop_in_paid") return `Paid drop-in${Number(credit.amount) ? ` ($${(Number(credit.amount) / 100).toFixed(2)})` : ""}; refunded to your card if the club cancels, or if you cancel before the late-cancel window.`;
-  if (credit?.basis === "unlimited") return "Booked on an unlimited membership.";
-  if (credit?.basis === "debited_at_booking") return "Used one class credit from your membership allowance; it's returned if you cancel before the class starts.";
-  if (credit?.basis === "debited_when_confirmed") return "A class credit is used only if your waitlist place is confirmed.";
+  const spent = credit?.spent ?? credit?.basis;
+  if (spent === "unlimited") return "Booked on an unlimited membership.";
+  if (spent === "debited_at_booking") return credit?.source && credit.source !== "membership_period" ? "Used one class credit from your pack; it's returned to the same pack if you cancel before the cancellation window." : "Used one class credit from your membership allowance; it's returned if you cancel before the cancellation window.";
+  if (spent === "debited_when_confirmed") return "A class credit is used only if your waitlist place is confirmed.";
   return booked?.creditTerms ? `Credit terms: ${booked.creditTerms}.` : null;
 }

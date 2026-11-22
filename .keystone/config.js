@@ -316,9 +316,9 @@ ${additions}
 }
 function connectedRelationshipId(value) {
   if (!value || typeof value !== "object") return void 0;
-  const relationship41 = value;
-  if (relationship41.disconnect) return null;
-  return typeof relationship41.connect?.id === "string" ? relationship41.connect.id : void 0;
+  const relationship40 = value;
+  if (relationship40.disconnect) return null;
+  return typeof relationship40.connect?.id === "string" ? relationship40.connect.id : void 0;
 }
 function tenantOrganizationId(resolvedData, item) {
   const connected = connectedRelationshipId(resolvedData.organization);
@@ -414,14 +414,167 @@ var init_tenantRelationships = __esm({
   }
 });
 
-// features/keystone/lib/participation-terms.ts
-function isParticipationTermsPlaceholder(text43) {
-  const normalize = (value) => value.replace(/[‘’]/g, "'").replace(/\s+/g, " ").trim().toLowerCase();
-  return normalize(text43) === normalize(PARTICIPATION_TERMS_PLACEHOLDER);
+// features/keystone/lib/credits.ts
+function grantUsableAt(grant, at, now = /* @__PURE__ */ new Date()) {
+  if (!grant || grant.status !== "active") return false;
+  if (grant.remaining === 0) return false;
+  if (new Date(grant.validFrom) > at) return false;
+  const expires = grant.expiresAt ? new Date(grant.expiresAt) : new Date(now.getTime() + Number(grant.validDays || 0) * DAY);
+  return expires > at && expires > now;
 }
-async function publishParticipationTerms(tx, organizationId, text43, publishedBy) {
+function orderForSpending(grants, now = /* @__PURE__ */ new Date()) {
+  const expiry = (grant) => grant.expiresAt ? new Date(grant.expiresAt).getTime() : now.getTime() + Number(grant.validDays || 0) * DAY;
+  return [...grants].sort((a, b) => expiry(a) - expiry(b) || (a.remaining === -1 ? 1 : 0) - (b.remaining === -1 ? 1 : 0) || String(a.id).localeCompare(String(b.id)));
+}
+async function usableGrants(tx, organizationId, memberId, kind, at, options = {}) {
+  tx = guardKeystonePrismaResults(tx);
+  const now = /* @__PURE__ */ new Date();
+  const rows = await tx.creditGrant.findMany({
+    where: { organizationId, memberId, kind, status: "active", remaining: { not: 0 }, validFrom: { lte: at }, OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+    include: { classPack: { select: { locations: { select: { id: true } } } } },
+    take: 200
+  });
+  const usable = rows.filter((grant) => {
+    if (!grantUsableAt(grant, at, now)) return false;
+    const locations = grant.classPack?.locations ?? [];
+    return !options.locationId || !locations.length || locations.some((location2) => location2.id === options.locationId);
+  });
+  return orderForSpending(usable, now);
+}
+async function writeEntry(tx, grant, data) {
+  return tx.creditEntry.create({ data: {
+    organizationId: grant.organizationId,
+    memberId: grant.memberId,
+    grantId: grant.id,
+    eventKey: data.eventKey,
+    kind: data.kind,
+    delta: data.delta,
+    balanceAfter: data.balanceAfter,
+    bookingId: data.bookingId ?? null,
+    appointmentId: data.appointmentId ?? null,
+    actorId: data.actorId ?? null,
+    reason: (data.reason ?? "").slice(0, 1e3)
+  } });
+}
+async function issueGrant(tx, input) {
+  tx = guardKeystonePrismaResults(tx);
+  const existing = await tx.creditGrant.findFirst({ where: { organizationId: input.organizationId, sourceKey: input.sourceKey } });
+  if (existing) return { grant: existing, created: false };
+  if (!Number.isInteger(input.quantity) || input.quantity < -1 || input.quantity === 0) throw new Error("A credit grant needs a positive quantity or unlimited");
+  const grant = await tx.creditGrant.create({ data: {
+    organizationId: input.organizationId,
+    memberId: input.memberId,
+    source: input.source,
+    sourceKey: input.sourceKey,
+    kind: input.kind,
+    quantity: input.quantity,
+    remaining: input.quantity,
+    validFrom: input.validFrom,
+    expiresAt: input.expiresAt,
+    validDays: input.validDays ?? null,
+    classPackId: input.classPackId ?? null,
+    membershipId: input.membershipId ?? null,
+    paymentId: input.paymentId ?? null,
+    priceSnapshot: input.priceSnapshot ?? {},
+    note: (input.note ?? "").slice(0, 500),
+    status: "active"
+  } });
+  await writeEntry(tx, grant, { eventKey: `${grant.id}:grant`, kind: "grant", delta: input.quantity === -1 ? 0 : input.quantity, balanceAfter: input.quantity, actorId: input.actorId });
+  return { grant, created: true };
+}
+async function spendCredit(tx, input) {
+  tx = guardKeystonePrismaResults(tx);
+  const replay2 = await tx.creditEntry.findFirst({ where: { organizationId: input.organizationId, eventKey: input.eventKey } });
+  if (replay2) return tx.creditGrant.findUnique({ where: { id: replay2.grantId } });
+  let grants = await usableGrants(tx, input.organizationId, input.memberId, input.kind, input.at, { locationId: input.locationId });
+  if (input.preferGrantIds?.length) grants = [...grants.filter((g) => input.preferGrantIds.includes(g.id)), ...grants.filter((g) => !input.preferGrantIds.includes(g.id))];
+  const grant = grants[0];
+  if (!grant) throw new Error(input.kind === "group" ? "No class credits remaining" : `No ${input.kind} credits remaining`);
+  const now = /* @__PURE__ */ new Date();
+  const activation = !grant.expiresAt ? { expiresAt: new Date(now.getTime() + Number(grant.validDays || 0) * DAY) } : {};
+  let updated = grant;
+  if (grant.remaining === -1) {
+    if (Object.keys(activation).length) updated = await tx.creditGrant.update({ where: { id: grant.id }, data: activation });
+  } else {
+    const result = await tx.creditGrant.updateMany({ where: { id: grant.id, remaining: { gte: 1 } }, data: { remaining: { decrement: 1 }, ...activation } });
+    if (result.count !== 1) throw new Error("No class credits remaining");
+    updated = await tx.creditGrant.findUnique({ where: { id: grant.id } });
+  }
+  await writeEntry(tx, updated, { eventKey: input.eventKey, kind: "debit", delta: grant.remaining === -1 ? 0 : -1, balanceAfter: updated.remaining, bookingId: input.bookingId, appointmentId: input.appointmentId });
+  return updated;
+}
+async function restoreCredit(tx, organizationId, debitEventKey, restoreEventKey) {
+  tx = guardKeystonePrismaResults(tx);
+  const debit = await tx.creditEntry.findFirst({ where: { organizationId, eventKey: debitEventKey, kind: "debit" } });
+  if (!debit) return false;
+  if (await tx.creditEntry.findFirst({ where: { organizationId, eventKey: restoreEventKey } })) return false;
+  const grant = await tx.creditGrant.findUnique({ where: { id: debit.grantId } });
+  if (!grant) throw new Error("Credit source grant is missing");
+  const restores = debit.delta < 0 && grant.remaining !== -1 && grant.status === "active";
+  const updated = restores ? await tx.creditGrant.update({ where: { id: grant.id }, data: { remaining: Math.min(grant.quantity, grant.remaining - debit.delta) } }) : grant;
+  await writeEntry(tx, updated, { eventKey: restoreEventKey, kind: "restore", delta: restores ? -debit.delta : 0, balanceAfter: updated.remaining, bookingId: debit.bookingId, appointmentId: debit.appointmentId });
+  return restores;
+}
+async function adjustGrant(tx, input) {
+  tx = guardKeystonePrismaResults(tx);
+  const grant = await tx.creditGrant.findFirst({ where: { id: input.grantId, organizationId: input.organizationId } });
+  if (!grant) throw new Error("Credit grant not found");
+  if (grant.remaining === -1) throw new Error("An unlimited grant cannot be adjusted");
+  if (!Number.isInteger(input.delta) || input.delta === 0 || Math.abs(input.delta) > 500) throw new Error("Adjustment must be a whole number from -500 to 500, not 0");
+  if (grant.remaining + input.delta < 0) throw new Error(`Only ${grant.remaining} credits are left on this grant`);
+  const updated = await tx.creditGrant.update({ where: { id: grant.id }, data: { remaining: grant.remaining + input.delta, quantity: Math.max(grant.quantity, grant.remaining + input.delta) } });
+  await writeEntry(tx, updated, { eventKey: input.eventKey, kind: "adjust", delta: input.delta, balanceAfter: updated.remaining, actorId: input.actorId, reason: input.reason });
+  return updated;
+}
+async function creditSummary(tx, organizationId, memberId) {
+  tx = guardKeystonePrismaResults(tx);
+  const now = /* @__PURE__ */ new Date();
+  const grants = await tx.creditGrant.findMany({ where: { organizationId, memberId }, include: { classPack: { select: { name: true } }, membership: { select: { tier: { select: { name: true } } } } }, orderBy: [{ validFrom: "desc" }], take: 200 });
+  const rows = grants.map((grant) => {
+    const expires = grant.expiresAt ? new Date(grant.expiresAt) : null;
+    const expired = Boolean(expires && expires <= now);
+    const state = grant.status !== "active" ? grant.status : expired ? "expired" : grant.remaining === 0 ? "exhausted" : "active";
+    return {
+      id: grant.id,
+      source: grant.source,
+      kind: grant.kind,
+      quantity: grant.quantity,
+      remaining: grant.remaining,
+      validFrom: grant.validFrom,
+      expiresAt: grant.expiresAt,
+      activatesOnFirstBooking: !grant.expiresAt,
+      state,
+      name: grant.classPack?.name || grant.membership?.tier?.name || grant.note || grant.source
+    };
+  });
+  const balances = {};
+  for (const kind of ["group", "private", "duet"]) {
+    const active = orderForSpending(grants.filter((g) => g.kind === kind && grantUsableAt(g, now, now)), now);
+    balances[kind] = {
+      remaining: active.reduce((sum, g) => sum + (g.remaining === -1 ? 0 : g.remaining), 0),
+      unlimited: active.some((g) => g.remaining === -1),
+      nextExpiry: active[0]?.expiresAt ? new Date(active[0].expiresAt).toISOString() : null
+    };
+  }
+  return { balances, grants: rows };
+}
+var DAY;
+var init_credits = __esm({
+  "features/keystone/lib/credits.ts"() {
+    "use strict";
+    init_prisma_result();
+    DAY = 864e5;
+  }
+});
+
+// features/keystone/lib/participation-terms.ts
+function isParticipationTermsPlaceholder(text42) {
+  const normalize = (value) => value.replace(/[‘’]/g, "'").replace(/\s+/g, " ").trim().toLowerCase();
+  return normalize(text42) === normalize(PARTICIPATION_TERMS_PLACEHOLDER);
+}
+async function publishParticipationTerms(tx, organizationId, text42, publishedBy) {
   await lockParticipationPolicy(tx, organizationId);
-  const body = text43.trim();
+  const body = text42.trim();
   const enforce = Boolean(body) && !isParticipationTermsPlaceholder(body);
   const latest = await tx.participationPolicy.findFirst({ where: { organizationId }, orderBy: [{ createdAt: "desc" }, { id: "desc" }] });
   if (latest && latest.documentReference === PARTICIPATION_TERMS_PATH && latest.documentText === body && latest.enforceWaiver === enforce) return latest;
@@ -579,6 +732,14 @@ function monthlyServicePeriod(membership, at) {
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || at < start || at >= end) {
     throw new Error("Service is outside the paid membership period");
   }
+  const period = membership.agreementSnapshot?.billingPeriod;
+  const stepDays = period === "week" ? 7 : period === "fortnight" ? 14 : period === "four_weeks" ? 28 : 0;
+  if (stepDays && membership.billingCycle !== "annual") {
+    const index = Math.floor((at.getTime() - start.getTime()) / (stepDays * DAY2));
+    const periodStart2 = new Date(start.getTime() + index * stepDays * DAY2);
+    const next2 = new Date(periodStart2.getTime() + stepDays * DAY2);
+    return { periodStart: periodStart2, periodEnd: next2 < end ? next2 : end };
+  }
   const monthAt = (offset2) => {
     const result = new Date(start);
     result.setUTCDate(1);
@@ -610,65 +771,62 @@ async function assertNoPendingMembershipFreeze(tx, organizationId, membershipId)
   if (attempt instanceof Error) throw attempt;
   if (attempt) throw new Error("Membership freeze is being finalized; participation is temporarily unavailable");
 }
+async function memberIdForMembership(tx, membership) {
+  const member = await tx.member.findFirst({ where: { organizationId: membership.organizationId, userId: membership.memberId }, select: { id: true } });
+  if (!member) throw new Error("Membership has no member profile");
+  return member.id;
+}
 async function ensureMonthlyCreditGrant(tx, membership, at) {
   tx = guardKeystonePrismaResults(tx);
   assertMembershipServiceEligibility(membership, at);
   const { periodStart, periodEnd } = monthlyServicePeriod(membership, at);
   const allowance = membership.agreementSnapshot?.classCreditsPerMonth ?? membership.tier?.classCreditsPerMonth;
   if (!Number.isInteger(allowance) || allowance < -1) throw new Error("Membership credit allowance requires review");
-  const key = `${membership.id}:${periodStart.toISOString()}`;
-  const existing = await tx.membershipCreditGrant.findUnique({ where: { key } });
-  if (existing) return existing;
-  const anyGrant = await tx.membershipCreditGrant.findFirst({ where: { membershipId: membership.id } });
-  const now = /* @__PURE__ */ new Date();
-  const preserveLegacyBalance = !anyGrant && membership.agreementSnapshot?.creditLedgerPolicy !== "monthly-grant-v1" && periodStart.getTime() === new Date(membership.creditPeriodStart || membership.startDate).getTime() && periodStart <= now && now < periodEnd;
-  const remaining = allowance === -1 ? -1 : preserveLegacyBalance ? Math.min(Math.max(membership.classCreditsRemaining ?? 0, 0), Math.max(allowance, 0)) : allowance;
-  return tx.membershipCreditGrant.create({ data: {
-    key,
+  const memberId = await memberIdForMembership(tx, membership);
+  const sourceKey = `membership:${membership.id}:${periodStart.toISOString()}`;
+  let quantity = allowance;
+  if (allowance > 0 && Number(membership.agreementSnapshot?.rolloverPeriods ?? 0) >= 1) {
+    const previous = await tx.creditGrant.findFirst({ where: { organizationId: membership.organizationId, membershipId: membership.id, source: "membership_period", expiresAt: { lte: periodStart } }, orderBy: [{ expiresAt: "desc" }] });
+    const carried = previous && previous.remaining > 0 && previous.expiresAt.getTime() === periodStart.getTime() && !previous.priceSnapshot?.rolledOver ? Math.min(previous.remaining, allowance) : 0;
+    quantity = allowance + carried;
+  }
+  if (allowance === 0) return { id: null, allowance: 0, remaining: 0, periodStart, periodEnd };
+  const { grant } = await issueGrant(tx, {
     organizationId: membership.organizationId,
+    memberId,
+    source: "membership_period",
+    sourceKey,
+    kind: "group",
+    quantity,
+    validFrom: periodStart,
+    expiresAt: periodEnd,
     membershipId: membership.id,
-    periodStart,
-    periodEnd,
-    allowance,
-    remaining
-  } });
+    priceSnapshot: { tierId: membership.tierId ?? null, amount: membership.agreementSnapshot?.amount ?? null, billingPeriod: membership.agreementSnapshot?.billingPeriod ?? "month" }
+  });
+  return { ...grant, allowance: grant.quantity, periodStart, periodEnd };
 }
-async function debitBookingCredit(tx, membership, bookingId, at) {
+async function debitBookingCredit(tx, membership, bookingId, at, options = {}) {
   tx = guardKeystonePrismaResults(tx);
-  const key = `${bookingId}:debit`;
-  const existing = await tx.membershipCreditEntry.findUnique({ where: { key } });
-  if (existing) return tx.membershipCreditGrant.findUnique({ where: { id: existing.grantId } });
-  const grant = await ensureMonthlyCreditGrant(tx, membership, at);
-  if (grant.allowance !== -1 && grant.remaining <= 0) throw new Error("No class credits remaining for this service month");
-  const amount = grant.allowance === -1 ? 0 : -1;
-  const updated = amount ? await tx.membershipCreditGrant.update({ where: { id: grant.id }, data: { remaining: { decrement: 1 } } }) : grant;
-  await tx.membershipCreditEntry.create({ data: {
-    key,
-    organizationId: membership.organizationId,
-    grantId: grant.id,
-    bookingId,
-    delta: amount,
-    kind: "booking"
-  } });
-  await updateCurrentCreditDisplay(tx, membership.id);
-  return updated;
+  const booking = await tx.classBooking.findUnique({ where: { id: bookingId }, select: { organizationId: true, memberId: true } });
+  if (!booking) throw new Error("Booking not found");
+  if (membership) await ensureMonthlyCreditGrant(tx, membership, at);
+  const grant = await spendCredit(tx, { organizationId: booking.organizationId, memberId: options.memberId ?? booking.memberId, kind: "group", at, eventKey: `${bookingId}:debit`, bookingId, locationId: options.locationId });
+  if (membership) await updateCurrentCreditDisplay(tx, membership.id);
+  return grant;
 }
 async function restoreBookingCredit(tx, bookingId) {
   tx = guardKeystonePrismaResults(tx);
-  const debit = await tx.membershipCreditEntry.findUnique({ where: { key: `${bookingId}:debit` } });
+  const booking = await tx.classBooking.findUnique({ where: { id: bookingId }, select: { organizationId: true } });
+  if (!booking) return false;
+  const debit = await tx.creditEntry.findFirst({ where: { organizationId: booking.organizationId, eventKey: `${bookingId}:debit` } });
   if (!debit) {
-    await tx.classBooking.update({ where: { id: bookingId }, data: { eligibilityReviewReason: "Legacy booking has no credit provenance; staff must review any credit adjustment" } });
+    await tx.classBooking.update({ where: { id: bookingId }, data: { eligibilityReviewReason: "This booking has no credit record; staff must review any credit adjustment" } });
     return false;
   }
-  const key = `${bookingId}:restore`;
-  if (await tx.membershipCreditEntry.findUnique({ where: { key } })) return false;
-  const grant = await tx.membershipCreditGrant.findUnique({ where: { id: debit.grantId } });
-  if (!grant) throw new Error("Credit source grant is missing");
-  const restores = debit.delta < 0 && grant.allowance !== -1;
-  if (restores) await tx.membershipCreditGrant.update({ where: { id: grant.id }, data: { remaining: Math.min(grant.allowance, grant.remaining - debit.delta) } });
-  await tx.membershipCreditEntry.create({ data: { key, organizationId: grant.organizationId, grantId: grant.id, bookingId, delta: -debit.delta, kind: "restoration" } });
-  await updateCurrentCreditDisplay(tx, grant.membershipId);
-  return restores;
+  const restored = await restoreCredit(tx, booking.organizationId, `${bookingId}:debit`, `${bookingId}:restore`);
+  const grant = await tx.creditGrant.findUnique({ where: { id: debit.grantId }, select: { membershipId: true } });
+  if (grant?.membershipId) await updateCurrentCreditDisplay(tx, grant.membershipId);
+  return restored;
 }
 async function applyPlanAllowanceToCurrentGrant(tx, membership, at) {
   tx = guardKeystonePrismaResults(tx);
@@ -680,16 +838,19 @@ async function applyPlanAllowanceToCurrentGrant(tx, membership, at) {
   } catch {
     return null;
   }
-  const grant = await tx.membershipCreditGrant.findUnique({ where: { key: `${membership.id}:${period.periodStart.toISOString()}` } });
+  const grant = await tx.creditGrant.findFirst({ where: { organizationId: membership.organizationId, sourceKey: `membership:${membership.id}:${period.periodStart.toISOString()}` } });
   if (!grant) return null;
-  const updated = await tx.membershipCreditGrant.update({ where: { id: grant.id }, data: { allowance, remaining: allowance } });
+  const used = grant.remaining === -1 || grant.quantity === -1 ? 0 : grant.quantity - grant.remaining;
+  const remaining = allowance === -1 ? -1 : Math.max(allowance - used, 0);
+  const updated = await tx.creditGrant.update({ where: { id: grant.id }, data: { quantity: allowance === -1 ? -1 : Math.max(allowance, used), remaining } });
+  await tx.creditEntry.create({ data: { organizationId: grant.organizationId, memberId: grant.memberId, grantId: grant.id, eventKey: `${grant.id}:plan:${at.toISOString()}`, kind: "adjust", delta: remaining === -1 || grant.remaining === -1 ? 0 : remaining - grant.remaining, balanceAfter: remaining, reason: "Plan change" } });
   await updateCurrentCreditDisplay(tx, membership.id);
-  return updated;
+  return { ...updated, allowance: updated.quantity };
 }
 async function updateCurrentCreditDisplay(tx, membershipId) {
   tx = guardKeystonePrismaResults(tx);
   const now = /* @__PURE__ */ new Date();
-  const current = await tx.membershipCreditGrant.findFirst({ where: { membershipId, periodStart: { lte: now }, periodEnd: { gt: now } }, orderBy: [{ periodStart: "desc" }, { createdAt: "desc" }] });
+  const current = await tx.creditGrant.findFirst({ where: { membershipId, source: "membership_period", validFrom: { lte: now }, expiresAt: { gt: now } }, orderBy: [{ validFrom: "desc" }, { createdAt: "desc" }] });
   if (current) await tx.membership.update({ where: { id: membershipId }, data: { classCreditsRemaining: current.remaining } });
 }
 async function reviewFutureMembershipBookings(tx, membership) {
@@ -756,10 +917,111 @@ async function refreshScopedMembership(prisma, organizationId, membershipId) {
     return { refreshed, reason, membershipId, reviewed, reviewLimitReached: reviewed >= 1e3 };
   });
 }
+var DAY2;
 var init_membership_credits = __esm({
   "features/keystone/lib/membership-credits.ts"() {
     "use strict";
     init_prisma_result();
+    init_credits();
+    DAY2 = 864e5;
+  }
+});
+
+// features/keystone/lib/booking-rules.ts
+function localClock(at, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone, hour12: false, weekday: "short", hour: "2-digit", minute: "2-digit", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(at);
+  const get = (type) => parts.find((p2) => p2.type === type)?.value ?? "";
+  const weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(get("weekday")) + 1;
+  const hour = get("hour") === "24" ? "00" : get("hour");
+  return { weekday, time: `${hour}:${get("minute")}`, day: `${get("year")}-${get("month")}-${get("day")}`, month: `${get("year")}-${get("month")}` };
+}
+function insideOffPeak(at, timeZone, windows) {
+  const clock2 = localClock(at, timeZone);
+  return (Array.isArray(windows) ? windows : []).some((w) => Array.isArray(w?.days) && w.days.includes(clock2.weekday) && typeof w.from === "string" && typeof w.to === "string" && clock2.time >= w.from && clock2.time < w.to);
+}
+async function studioTimeZone(tx, organizationId) {
+  const settings = await tx.studioSettings.findFirst({ where: { organizationId }, orderBy: [{ createdAt: "asc" }], select: { timezone: true, bookingHorizonDays: true } });
+  const org = await tx.organization.findUnique({ where: { id: organizationId }, select: { timezone: true } });
+  return { timeZone: settings?.timezone || org?.timezone || "UTC", horizonDays: Number(settings?.bookingHorizonDays ?? 14) || 14 };
+}
+async function hasAttendedIntro(tx, organizationId, memberId) {
+  const attended = await tx.classBooking.findFirst({ where: { organizationId, memberId, status: "attended", classInstance: { classSchedule: { classType: { isIntroClass: true } } } }, select: { id: true } });
+  if (attended) return true;
+  const marked = await tx.attendanceRecord.findFirst({ where: { organizationId, memberId, attended: true, booking: { classInstance: { classSchedule: { classType: { isIntroClass: true } } } } }, select: { id: true } });
+  return Boolean(marked);
+}
+async function assertBookingRules(txIn, input) {
+  const tx = guardKeystonePrismaResults(txIn);
+  const { organizationId, member, instance } = input;
+  const at = new Date(instance.date);
+  const now = /* @__PURE__ */ new Date();
+  const classType = instance.classSchedule?.classType ?? null;
+  const membership = member.user?.id ? await tx.membership.findFirst({ where: { memberId: member.user.id, organizationId }, include: { tier: true } }) : null;
+  if (membership && ["past-due", "past_due"].includes(membership.status)) throw new Error("Your membership payment failed. Update your card in your account before booking.");
+  if (await tx.fee?.findFirst?.({ where: { organizationId, memberId: member.id, status: "owed" }, select: { id: true } })) {
+    throw new Error("You have a fee owed. Pay it in your account before booking.");
+  }
+  if (classType?.requiresIntro && !await hasAttendedIntro(tx, organizationId, member.id)) {
+    throw new Error("This class needs a completed intro class first. Book a Foundations class to start.");
+  }
+  const activeMembership = membership && membership.status === "active" ? membership : null;
+  if (activeMembership) await assertNoPendingMembershipFreeze(tx, organizationId, activeMembership.id);
+  const terms = activeMembership?.agreementSnapshot ?? {};
+  const { timeZone, horizonDays } = await studioTimeZone(tx, organizationId);
+  if (!input.actorIsStaff) {
+    const windowDays = activeMembership ? Number(terms.advanceBookingDays ?? activeMembership.tier?.advanceBookingDays ?? horizonDays) : horizonDays;
+    if (at.getTime() - now.getTime() > windowDays * DAY3) throw new Error(`Classes open for booking ${windowDays} days ahead`);
+  }
+  if (input.dropIn) return { membership: null, grant: null, unlimited: false, remaining: 0 };
+  let membershipCovers = false;
+  if (activeMembership) {
+    try {
+      assertMembershipServiceEligibility(activeMembership, at);
+      const offPeakOnly = Boolean(terms.offPeakOnly ?? activeMembership.tier?.offPeakOnly);
+      if (offPeakOnly && !insideOffPeak(at, timeZone, terms.offPeakWindows ?? activeMembership.tier?.offPeakWindows)) throw new Error("Your off-peak membership doesn't cover this time");
+      await ensureMonthlyCreditGrant(tx, activeMembership, at);
+      membershipCovers = true;
+    } catch (error) {
+      if (!(error instanceof Error) || !/outside the paid membership period|frozen|off-peak/.test(error.message)) throw error;
+      if (/off-peak/.test(error.message) && !(await usableGrants(tx, organizationId, member.id, "group", at)).some((g) => g.source !== "membership_period")) throw error;
+    }
+  }
+  if (membershipCovers) {
+    const perDay = Number(terms.maxBookingsPerDay ?? activeMembership.tier?.maxBookingsPerDay ?? 0);
+    const perMonth = Number(terms.maxBookingsPerMonth ?? activeMembership.tier?.maxBookingsPerMonth ?? 0);
+    if (perDay > 0 || perMonth > 0) {
+      const clock2 = localClock(at, timeZone);
+      const around = await tx.classBooking.findMany({
+        where: { organizationId, memberId: member.id, status: { in: [...LIVE] }, classInstanceId: { not: instance.id }, classInstance: { isCancelled: false, date: { gte: new Date(at.getTime() - 32 * DAY3), lt: new Date(at.getTime() + 32 * DAY3) } } },
+        select: { status: true, classInstance: { select: { date: true } } },
+        take: 2e3
+      });
+      const counted = around.filter((b) => b.status !== "late_cancelled").map((b) => localClock(new Date(b.classInstance.date), timeZone));
+      if (perDay > 0 && counted.filter((c) => c.day === clock2.day).length >= perDay) throw new Error(`Your plan allows ${perDay} class${perDay === 1 ? "" : "es"} a day`);
+      if (perMonth > 0 && counted.filter((c) => c.month === clock2.month).length >= perMonth) throw new Error(`Your plan allows ${perMonth} classes a month`);
+    }
+  }
+  const kind = classType?.creditKind || "group";
+  const grants = await usableGrants(tx, organizationId, member.id, kind, at, { locationId: instance.locationId ?? instance.classSchedule?.locationId ?? null });
+  const grant = grants[0] ?? null;
+  if (!grant && input.requireCredit) {
+    if (!activeMembership && !grants.length) {
+      const anyGrant = await tx.creditGrant.findFirst({ where: { organizationId, memberId: member.id }, select: { id: true } });
+      throw new Error(anyGrant ? "No class credits remaining" : "Buy a class pack, intro offer or membership to book");
+    }
+    throw new Error("No class credits remaining");
+  }
+  return { membership: activeMembership, grant, unlimited: grant?.remaining === -1, remaining: grant ? grant.remaining : 0 };
+}
+var DAY3, LIVE;
+var init_booking_rules = __esm({
+  "features/keystone/lib/booking-rules.ts"() {
+    "use strict";
+    init_prisma_result();
+    init_credits();
+    init_membership_credits();
+    DAY3 = 864e5;
+    LIVE = ["confirmed", "attended", "no_show", "late_cancelled"];
   }
 });
 
@@ -873,8 +1135,8 @@ function historyEntry(action, extra = {}) {
   return { action, at: (/* @__PURE__ */ new Date()).toISOString(), ...extra };
 }
 function appendHistory(previous, entry) {
-  const list43 = Array.isArray(previous) ? previous : [];
-  return [...list43.slice(-99), entry];
+  const list42 = Array.isArray(previous) ? previous : [];
+  return [...list42.slice(-99), entry];
 }
 async function waitlistCutoffMinutes(tx, organizationId) {
   tx = guardKeystonePrismaResults(tx);
@@ -937,12 +1199,12 @@ function verifiedInternalIdentity(headers, socketAddress, secret = String(proces
   const loopback = /^(?:127\.|::1$|::ffff:127\.)/.test(String(socketAddress || ""));
   if (!loopback || secret.length < 32) return null;
   const identity = header(headers, "x-openfront-client-identity");
-  const timestamp31 = header(headers, "x-openfront-client-timestamp");
+  const timestamp30 = header(headers, "x-openfront-client-timestamp");
   const signature = header(headers, "x-openfront-client-signature");
-  if (!/^[a-f0-9]{64}$/.test(identity) || !/^\d{10}$/.test(timestamp31) || !/^[a-f0-9]{64}$/.test(signature)) return null;
-  const age = Math.abs(now - Number(timestamp31) * 1e3);
+  if (!/^[a-f0-9]{64}$/.test(identity) || !/^\d{10}$/.test(timestamp30) || !/^[a-f0-9]{64}$/.test(signature)) return null;
+  const age = Math.abs(now - Number(timestamp30) * 1e3);
   if (!Number.isFinite(age) || age > INTERNAL_IDENTITY_MAX_AGE_MS) return null;
-  const expected = (0, import_node_crypto4.createHmac)("sha256", secret).update(`${timestamp31}:${identity}`).digest("hex");
+  const expected = (0, import_node_crypto4.createHmac)("sha256", secret).update(`${timestamp30}:${identity}`).digest("hex");
   return safeEqual(signature, expected) ? `forwarded:${identity}` : null;
 }
 function railwayEdgeSource(headers, socketAddress) {
@@ -1508,7 +1770,7 @@ async function createCapacityControlledBookingInTransaction(transaction, input) 
             isActive: true,
             resourceId: true,
             resource: PHYSICAL_RESOURCE,
-            classType: { select: { id: true, name: true, capacityMode: true } },
+            classType: { select: { id: true, name: true, capacityMode: true, requiresIntro: true, creditKind: true } },
             location: { select: { id: true, name: true, address: true, isActive: true } },
             instructor: { select: { id: true, user: { select: { name: true } } } }
           }
@@ -1546,19 +1808,13 @@ async function createCapacityControlledBookingInTransaction(transaction, input) 
       throw new Error("Member already has an active booking for this class instance");
     }
     const dropIn = input.dropIn ?? null;
-    const membership = dropIn ? null : await transaction.membership.findFirst({
-      where: { memberId: member.user.id, organizationId: input.actorOrganizationId, status: "active" },
-      include: { tier: { select: { classCreditsPerMonth: true, maxClassBookings: true } } }
-    });
-    if (!dropIn && !membership) throw new Error("No active membership found");
-    if (membership) await assertNoPendingMembershipFreeze(transaction, input.actorOrganizationId, membership.id);
     const participation = await assertParticipationAllowed(transaction, input.actorOrganizationId, member.id, classInstance.date, classInstance.locationId);
-    const grant = membership ? await ensureMonthlyCreditGrant(transaction, membership, classInstance.date) : null;
-    const unlimited = grant ? grant.allowance === -1 : false;
-    const currentCredits = grant ? grant.remaining : 0;
-    if (grant && !unlimited && currentCredits <= 0) {
-      throw new Error("No class credits remaining");
-    }
+    const funding = await assertBookingRules(transaction, { organizationId: input.actorOrganizationId, member, instance: classInstance, requireCredit: false, actorIsStaff: input.actorCanManageAllRecords, dropIn: Boolean(dropIn) });
+    const membership = funding.membership;
+    const grant = funding.grant;
+    const unlimited = funding.unlimited;
+    const currentCredits = funding.remaining;
+    const noUsableCredit = !dropIn && !grant;
     const maximumBookings = membership ? membership.agreementSnapshot?.maxClassBookings ?? membership.tier?.maxClassBookings ?? 0 : 0;
     if (maximumBookings > 0 && await transaction.classBooking.count({ where: { organizationId: input.actorOrganizationId, memberId: member.id, status: { in: ["confirmed", "waitlisted"] }, classInstance: { date: { gt: /* @__PURE__ */ new Date() } } } }) >= maximumBookings) throw new Error("Membership concurrent booking limit reached");
     await fillReleasedSeats(transaction, input.classInstanceId, input.actorOrganizationId);
@@ -1570,6 +1826,7 @@ async function createCapacityControlledBookingInTransaction(transaction, input) 
     if (atCapacity && input.capacityMode === "reject") {
       throw new Error("Class is at capacity, cannot process walk-in");
     }
+    if (!atCapacity && noUsableCredit) throw new Error("No class credits remaining");
     const spot = !atCapacity && mode === "pick_a_spot" ? chooseSpot(spots, taken, input.spotId ?? null) : null;
     if (!atCapacity && mode === "pick_a_spot" && !spot) throw new Error("No machine is free in this class");
     if (atCapacity && input.spotId) throw new Error("This class is full. Join the waitlist instead.");
@@ -1599,7 +1856,7 @@ async function createCapacityControlledBookingInTransaction(transaction, input) 
       },
       select: { id: true }
     });
-    if (status === "confirmed" && membership) await debitBookingCredit(transaction, membership, booking.id, classInstance.date);
+    if (status === "confirmed" && !dropIn) await debitBookingCredit(transaction, membership, booking.id, classInstance.date, { memberId: member.id, locationId: classInstance.locationId ?? null });
     await enqueueOperationalNotice(transaction, {
       organizationId: input.actorOrganizationId,
       memberId: member.id,
@@ -1613,7 +1870,7 @@ async function createCapacityControlledBookingInTransaction(transaction, input) 
       spotLabel: spot?.label ?? null,
       status,
       waitlistPosition,
-      creditsRemaining: dropIn ? 0 : unlimited ? -1 : currentCredits - (status === "confirmed" ? 1 : 0)
+      creditsRemaining: dropIn ? 0 : unlimited ? -1 : Math.max(currentCredits - (status === "confirmed" ? 1 : 0), 0)
     };
   }
 }
@@ -1641,20 +1898,23 @@ function bookingServiceSnapshot(classInstance, terms) {
     locationAddress: site?.address ?? null,
     startsAt: classInstance.date.toISOString(),
     endsAt: new Date(endsAt).toISOString(),
-    creditTerms: terms.dropIn ? "paid drop-in visit" : unlimitedCredits ? "unlimited membership" : "one membership class credit, restored if cancelled before the class starts",
+    creditTerms: terms.dropIn ? "paid drop-in visit" : unlimitedCredits ? "unlimited membership" : terms.grant?.source && terms.grant.source !== "membership_period" ? "one class credit from a pack, restored if cancelled in time" : "one membership class credit, restored if cancelled in time",
     credit: terms.dropIn ? {
       basis: "drop_in_paid",
       paymentSessionId: terms.dropIn.paymentSessionId,
       amount: terms.dropIn.amount,
       currencyCode: terms.dropIn.currencyCode
     } : {
-      membershipId: terms.membership.id,
-      agreementVersion: terms.membership.agreementSnapshot?.version ?? null,
+      // The credit source at booking time (§4.2 snapshot). The spent grant itself is on the debit entry.
+      source: terms.grant?.source ?? null,
+      membershipId: terms.membership?.id ?? null,
+      agreementVersion: terms.membership?.agreementSnapshot?.version ?? null,
       grantId: terms.grant?.id ?? null,
-      periodStart: terms.grant?.periodStart ? new Date(terms.grant.periodStart).toISOString() : null,
-      periodEnd: terms.grant?.periodEnd ? new Date(terms.grant.periodEnd).toISOString() : null,
+      periodStart: terms.grant?.validFrom ? new Date(terms.grant.validFrom).toISOString() : null,
+      periodEnd: terms.grant?.expiresAt ? new Date(terms.grant.expiresAt).toISOString() : null,
       // A waitlist place reserves its credit only when it is confirmed (see the booking's credit entry).
-      basis: unlimitedCredits ? "unlimited" : terms.status === "confirmed" ? "debited_at_booking" : "debited_when_confirmed"
+      basis: "credit",
+      spent: unlimitedCredits ? "unlimited" : terms.status === "confirmed" ? "debited_at_booking" : "debited_when_confirmed"
     },
     participation: terms.participation
   };
@@ -1684,7 +1944,7 @@ async function promoteCapacityControlledWaitlistBookingInTransaction(transaction
     include: {
       location: { select: { isActive: true } },
       resource: PHYSICAL_RESOURCE,
-      classSchedule: { select: { maxCapacity: true, startTime: true, endTime: true, isActive: true, resourceId: true, location: { select: { isActive: true } }, resource: PHYSICAL_RESOURCE, classType: { select: { capacityMode: true } } } }
+      classSchedule: { select: { maxCapacity: true, startTime: true, endTime: true, isActive: true, resourceId: true, locationId: true, location: { select: { isActive: true } }, resource: PHYSICAL_RESOURCE, classType: { select: { capacityMode: true, requiresIntro: true, creditKind: true } } } }
     }
   });
   if (!classInstance) throw new Error("Class instance not found");
@@ -1723,38 +1983,25 @@ async function promoteCapacityControlledWaitlistBookingInTransaction(transaction
       throw new Error("Waitlisted member is not in the class organization");
     }
     if (candidate.member?.status !== "active" || !candidate.member?.user?.id) continue;
-    const candidateMembership = await transaction.membership.findFirst({
-      where: { memberId: candidate.member.user.id, organizationId, status: "active" },
-      include: { tier: { select: { classCreditsPerMonth: true, maxClassBookings: true } } }
-    });
-    if (!candidateMembership) continue;
     await lockTransactionKey(transaction, `member:${candidate.memberId}`);
-    const lockedMembership = await transaction.membership.findFirst({
-      where: { id: candidateMembership.id, organizationId, status: "active" },
-      include: { tier: { select: { classCreditsPerMonth: true, maxClassBookings: true } } }
-    });
-    if (!lockedMembership) continue;
-    const lockedMember = await transaction.member.findFirst({ where: { id: candidate.memberId, organizationId, status: "active" } });
+    const lockedMember = await transaction.member.findFirst({ where: { id: candidate.memberId, organizationId, status: "active" }, include: { user: { select: { id: true, name: true, email: true } } } });
     if (!lockedMember) continue;
+    let lockedMembership = null;
     try {
-      await assertNoPendingMembershipFreeze(transaction, organizationId, lockedMembership.id);
       await assertParticipationAllowed(transaction, organizationId, candidate.memberId, classInstance.date, classInstance.locationId);
       await assertNoMemberServiceConflict(transaction, candidate.memberId, organizationId, classInstance);
-      const grant = await ensureMonthlyCreditGrant(transaction, lockedMembership, classInstance.date);
-      if (grant.allowance !== -1 && grant.remaining <= 0) {
-        await transaction.classBooking.update({ where: { id: candidate.id }, data: { eligibilityReviewReason: "", history: appendHistory(candidate.history, historyEntry("skipped", { reason: "no usable credit" })) } });
-        continue;
-      }
+      const funding = await assertBookingRules(transaction, { organizationId, member: lockedMember, instance: classInstance, requireCredit: true, actorIsStaff: true });
+      lockedMembership = funding.membership;
     } catch (error) {
-      if (!(error instanceof Error) || !/Membership|membership|Service is outside|waiver|Waiver|closure|closed|participation|Adult age verification|Registered participant verification|overlapping private appointment|overlapping class/i.test(error.message)) throw error;
-      await transaction.classBooking.update({ where: { id: candidate.id }, data: { eligibilityReviewReason: error.message, history: appendHistory(candidate.history, historyEntry("skipped", { reason: error.message })) } });
+      if (!(error instanceof Error) || !/credit|Membership|membership|Service is outside|waiver|Waiver|closure|closed|participation|Adult age verification|Registered participant verification|overlapping private appointment|overlapping class|fee owed|intro class|a day|a month|off-peak|payment failed|Buy a class pack/i.test(error.message)) throw error;
+      await transaction.classBooking.update({ where: { id: candidate.id }, data: { eligibilityReviewReason: /credit|Buy a class pack/i.test(error.message) ? "" : error.message, history: appendHistory(candidate.history, historyEntry("skipped", { reason: error.message })) } });
       continue;
     }
     booking = candidate;
     membership = lockedMembership;
     break;
   }
-  if (!booking || !membership) {
+  if (!booking) {
     return { promoted: false, message: "No eligible members on waitlist" };
   }
   await transaction.classBooking.update({
@@ -1768,7 +2015,7 @@ async function promoteCapacityControlledWaitlistBookingInTransaction(transaction
       history: appendHistory(booking.history, historyEntry("promoted", { manual, spotId: spot?.id ?? null, spotLabel: spot?.label ?? null }))
     }
   });
-  await debitBookingCredit(transaction, membership, booking.id, classInstance.date);
+  await debitBookingCredit(transaction, membership, booking.id, classInstance.date, { memberId: booking.memberId, locationId: classInstance.locationId ?? null });
   const promotionNotice = await enqueueOperationalNotice(transaction, {
     organizationId,
     memberId: booking.memberId,
@@ -1801,6 +2048,7 @@ var init_classCapacity = __esm({
   "features/keystone/mutations/classCapacity.ts"() {
     "use strict";
     init_membership_credits();
+    init_booking_rules();
     init_operational_policy();
     init_operational_notices();
     init_prisma_result();
@@ -1808,6 +2056,135 @@ var init_classCapacity = __esm({
     init_spots();
     PHYSICAL_RESOURCE = { select: { capacity: true, isActive: true } };
     DROP_IN_CLASS_FULL = "This class filled up before your drop-in payment completed";
+  }
+});
+
+// features/integrations/payment/commercial-agreement.ts
+function decimalToMinor(value) {
+  const raw = String(value ?? "");
+  if (!/^(0|[1-9]\d*)(\.\d{1,2})?$/.test(raw)) throw new Error("Membership prices must use at most two decimal places");
+  const [whole, fraction = ""] = raw.split(".");
+  const amount = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
+  if (!Number.isSafeInteger(amount) || amount > 2147483647) throw new Error("Membership price exceeds supported minor units");
+  return amount;
+}
+function tierAmountMinor(tier, cycle) {
+  const stored = cycle === "annual" ? tier.annualPriceMinor : tier.monthlyPriceMinor;
+  const legacy = decimalToMinor(cycle === "annual" ? tier.annualPrice : tier.monthlyPrice);
+  if (stored == null) return legacy;
+  if (!Number.isSafeInteger(stored) || stored < 0 || stored !== legacy) throw new Error("Membership catalog amount requires reconciliation");
+  return stored;
+}
+function membershipTierChangeCurrency(agreementSnapshot, organizationDefaultCurrency, studioSettingsCurrency) {
+  const currency = (value) => typeof value === "string" ? value.trim().toUpperCase() : "";
+  const contractCurrency = currency(agreementSnapshot?.currencyCode);
+  const organizationCurrency = currency(organizationDefaultCurrency);
+  const settingsCurrency = currency(studioSettingsCurrency);
+  if (contractCurrency !== "USD") {
+    throw new Error("This membership agreement has no supported USD contract currency; reconcile its commercial evidence before changing tiers.");
+  }
+  if (organizationCurrency !== contractCurrency || settingsCurrency !== contractCurrency) {
+    throw new Error("Currency settings do not match this membership agreement; reconcile Organization and Store Settings before changing tiers.");
+  }
+  return contractCurrency;
+}
+function snapshotMembershipAgreement(tier, billingCycle, currencyCode, options = {}) {
+  return {
+    version: 1,
+    acceptedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    tierId: tier.id,
+    tierName: tier.name,
+    billingCycle,
+    currencyCode,
+    amount: tierAmountMinor(tier, billingCycle),
+    // The exact provider price/product the member accepted; later catalog edits don't change it.
+    ...options.providerPriceId ? { providerPriceId: options.providerPriceId, providerProductId: options.providerProductId || null } : {},
+    monthlyPriceMinor: tierAmountMinor(tier, "monthly"),
+    annualPriceMinor: tierAmountMinor(tier, "annual"),
+    classCreditsPerMonth: tier.classCreditsPerMonth,
+    ...options.initialCreditLedger ? { creditLedgerPolicy: "monthly-grant-v1" } : {},
+    freezeAllowed: Boolean(tier.freezeAllowed),
+    contractLength: tier.contractLength ?? 0,
+    cancellationPolicy: "paid_period_end",
+    guestPasses: tier.guestPasses ?? 0,
+    maxClassBookings: tier.maxClassBookings ?? 0,
+    personalTrainingSessions: tier.personalTrainingSessions ?? 0,
+    // D10 rules fixed at joining, so a founding rate and its terms stay while the membership is active.
+    billingPeriod: tier.billingPeriod ?? "month",
+    maxBookingsPerDay: tier.maxBookingsPerDay ?? 0,
+    maxBookingsPerMonth: tier.maxBookingsPerMonth ?? 0,
+    cancelNoticeDays: tier.cancelNoticeDays ?? 30,
+    freezeMinDays: tier.freezeMinDays ?? 7,
+    freezeMaxDays: tier.freezeMaxDays ?? 30,
+    freezeDaysPerYear: tier.freezeDaysPerYear ?? 30,
+    freezeFee: tier.freezeFee ?? 0,
+    advanceBookingDays: tier.advanceBookingDays ?? 14,
+    offPeakOnly: Boolean(tier.offPeakOnly),
+    offPeakWindows: tier.offPeakWindows ?? [],
+    rolloverPeriods: tier.rolloverPeriods ?? 0
+  };
+}
+function acceptedProviderPrice(agreement, fallbacks) {
+  const amount = Number.isSafeInteger(agreement?.amount) ? agreement.amount : null;
+  const text42 = (value) => typeof value === "string" && value ? value : null;
+  if (text42(agreement?.providerPriceId)) return { priceId: agreement.providerPriceId, productId: text42(agreement.providerProductId), amount, basis: "agreement" };
+  if (text42(fallbacks.checkoutPriceId)) return { priceId: fallbacks.checkoutPriceId, productId: text42(fallbacks.checkoutProductId), amount, basis: "checkout" };
+  if (text42(fallbacks.tierPriceId)) return { priceId: fallbacks.tierPriceId, productId: null, amount, basis: "catalog" };
+  return null;
+}
+function periodInterval(billingCycle, billingPeriod) {
+  if (billingCycle === "annual") return { interval: "year", count: 1, days: [364, 367] };
+  if (billingPeriod === "week") return { interval: "week", count: 1, days: [6.5, 7.5] };
+  if (billingPeriod === "fortnight") return { interval: "week", count: 2, days: [13.5, 14.5] };
+  if (billingPeriod === "four_weeks") return { interval: "week", count: 4, days: [27.5, 28.5] };
+  return { interval: "month", count: 1, days: [27, 32] };
+}
+function priceProblem(price, quantity, accepted, billingCycle, billingPeriod) {
+  if (price?.id !== accepted.priceId) return `bills price ${price?.id || "none"} instead of the accepted ${accepted.priceId}`;
+  if (accepted.productId && providerId(price?.product) && providerId(price.product) !== accepted.productId) return "bills a different product";
+  if ((quantity ?? 1) !== 1) return `bills quantity ${quantity}`;
+  if (String(price?.currency || "").toUpperCase() !== "USD") return "bills a currency other than USD";
+  const expected = periodInterval(billingCycle, billingPeriod);
+  if (price?.recurring && (price.recurring.interval !== expected.interval || (price.recurring.interval_count ?? 1) !== expected.count)) return `bills every ${price.recurring.interval_count ?? 1} ${price.recurring.interval} instead of the accepted ${billingPeriod || billingCycle} period`;
+  if (accepted.amount !== null && Number.isSafeInteger(price?.unit_amount) && price.unit_amount !== accepted.amount) return "bills a different amount than the accepted agreement";
+  return null;
+}
+function subscriptionItemsProblem(subscription, accepted, billingCycle, billingPeriod) {
+  if (!accepted) return "no accepted provider price is recorded for this membership";
+  const items = subscription?.items?.data || [];
+  if (items.length !== 1) return `has ${items.length} billed items instead of one`;
+  return priceProblem(items[0].price, items[0].quantity, accepted, billingCycle, billingPeriod);
+}
+function invoiceServiceProblem(invoice, accepted, billingCycle, billingPeriod) {
+  if (!accepted) return "no accepted provider price is recorded for this membership";
+  const lines = (invoice?.lines?.data || []).filter((line2) => line2.type === "subscription" && !line2.proration);
+  if (lines.length !== 1) return `has ${lines.length} recurring service lines instead of one`;
+  const line = lines[0];
+  const problem = priceProblem(line.price, line.quantity, accepted, billingCycle, billingPeriod);
+  if (problem) return problem;
+  if (!Number.isSafeInteger(line.amount) || line.amount <= 0) return "has no positive amount for its service line";
+  const start = line.period?.start, end = line.period?.end;
+  if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start) return "has an invalid service period";
+  const days = (end - start) / 86400;
+  const span = periodInterval(billingCycle, billingPeriod).days;
+  if (days < span[0] || days > span[1]) return `covers ${Math.round(days)} days, not one ${billingPeriod && billingCycle !== "annual" ? billingPeriod.replace("_", " ") : billingCycle === "annual" ? "year" : "month"}`;
+  return null;
+}
+function assertCheckoutCorrelation(local, session, organizationId) {
+  if (!local || local.organization?.id !== organizationId) throw new Error("Local payment session not found in organization");
+  const metadata = session.metadata || {};
+  const legacyAttemptKey = `${local.idempotencyKey}:attempt:${local.data?.checkoutAttempt}`;
+  if (metadata.paymentSessionKey !== local.idempotencyKey && metadata.paymentSessionKey !== legacyAttemptKey) throw new Error("Checkout attempt does not match local payment session");
+  if (local.providerSessionId && local.providerSessionId !== session.id) throw new Error("Provider checkout session does not match local attempt");
+  if (local.user?.id !== metadata.userId || local.membershipTier?.id !== metadata.tierId || local.billingCycle !== metadata.billingCycle) throw new Error("Checkout ownership or commercial metadata does not match");
+  if (Number(metadata.amount) !== local.amount || String(metadata.currencyCode).toUpperCase() !== local.currencyCode || String(session.currency).toUpperCase() !== local.currencyCode) throw new Error("Checkout amount or currency does not match local agreement");
+  if (session.status !== "complete" || !["paid", "no_payment_required"].includes(session.payment_status)) throw new Error("Checkout payment is not settled");
+}
+var providerId;
+var init_commercial_agreement = __esm({
+  "features/integrations/payment/commercial-agreement.ts"() {
+    "use strict";
+    providerId = (value) => typeof value === "string" ? value : value?.id || null;
   }
 });
 
@@ -2570,11 +2947,11 @@ function range(open, close) {
 function parseDayHours(value) {
   try {
     if (typeof value === "string") {
-      const text43 = value.trim().toLowerCase();
-      if (!text43) return null;
-      if (text43 === "closed") return "closed";
-      if (text43 === "24/7" || text43 === "24 hours" || text43 === "open 24 hours") return "all";
-      return text43.split(/\s*[,;]\s*/).filter(Boolean).map((part) => {
+      const text42 = value.trim().toLowerCase();
+      if (!text42) return null;
+      if (text42 === "closed") return "closed";
+      if (text42 === "24/7" || text42 === "24 hours" || text42 === "open 24 hours") return "all";
+      return text42.split(/\s*[,;]\s*/).filter(Boolean).map((part) => {
         const [open, close, extra] = part.split(/\s*[-–—]\s*/);
         if (!open || !close || extra !== void 0) throw new Error("Hours need one opening and closing time");
         return range(open, close);
@@ -2715,39 +3092,39 @@ var init_studio_settings_content = __esm({
 });
 
 // features/keystone/models/Spot.ts
-var import_core41, import_access69, import_fields44, APPARATUS, Spot;
+var import_core39, import_access65, import_fields42, APPARATUS, Spot;
 var init_Spot = __esm({
   "features/keystone/models/Spot.ts"() {
     "use strict";
-    import_core41 = require("@keystone-6/core");
-    import_access69 = require("@keystone-6/core/access");
-    import_fields44 = require("@keystone-6/core/fields");
+    import_core39 = require("@keystone-6/core");
+    import_access65 = require("@keystone-6/core/access");
+    import_fields42 = require("@keystone-6/core/fields");
     init_access();
     init_tenantPolicy();
     init_trackingFields();
     init_tenantRelationships();
     APPARATUS = ["reformer", "tower", "chair", "cadillac", "barrel", "mat", "other"];
-    Spot = (0, import_core41.list)({
+    Spot = (0, import_core39.list)({
       db: { extendPrismaSchema: compoundUniqueDb("roomId, number") },
       access: {
-        operation: { query: isSignedIn, create: import_access69.denyAll, update: import_access69.denyAll, delete: import_access69.denyAll },
+        operation: { query: isSignedIn, create: import_access65.denyAll, update: import_access65.denyAll, delete: import_access65.denyAll },
         filter: { query: tenantFilter }
       },
       ui: { labelField: "label", listView: { initialColumns: ["room", "number", "label", "apparatus", "isBookable"] } },
       fields: {
-        organization: (0, import_fields44.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
-        room: (0, import_fields44.relationship)({ ref: "Room.spots", db: { extendPrismaSchema: requiredRelationshipDb("room") } }),
-        number: (0, import_fields44.integer)({ validation: { isRequired: true, min: 1, max: 500 } }),
-        label: (0, import_fields44.text)({ validation: { isRequired: true } }),
-        apparatus: (0, import_fields44.select)({ type: "string", options: APPARATUS.map((value) => ({ label: value[0].toUpperCase() + value.slice(1), value })), defaultValue: "reformer", validation: { isRequired: true } }),
-        x: (0, import_fields44.integer)({ defaultValue: 0, validation: { isRequired: true, min: 0, max: 99 } }),
-        y: (0, import_fields44.integer)({ defaultValue: 0, validation: { isRequired: true, min: 0, max: 99 } }),
-        isBookable: (0, import_fields44.checkbox)({ defaultValue: true }),
-        outOfServiceFrom: (0, import_fields44.timestamp)(),
-        outOfServiceUntil: (0, import_fields44.timestamp)(),
+        organization: (0, import_fields42.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
+        room: (0, import_fields42.relationship)({ ref: "Room.spots", db: { extendPrismaSchema: requiredRelationshipDb("room") } }),
+        number: (0, import_fields42.integer)({ validation: { isRequired: true, min: 1, max: 500 } }),
+        label: (0, import_fields42.text)({ validation: { isRequired: true } }),
+        apparatus: (0, import_fields42.select)({ type: "string", options: APPARATUS.map((value) => ({ label: value[0].toUpperCase() + value.slice(1), value })), defaultValue: "reformer", validation: { isRequired: true } }),
+        x: (0, import_fields42.integer)({ defaultValue: 0, validation: { isRequired: true, min: 0, max: 99 } }),
+        y: (0, import_fields42.integer)({ defaultValue: 0, validation: { isRequired: true, min: 0, max: 99 } }),
+        isBookable: (0, import_fields42.checkbox)({ defaultValue: true }),
+        outOfServiceFrom: (0, import_fields42.timestamp)(),
+        outOfServiceUntil: (0, import_fields42.timestamp)(),
         /** Set when the spot is removed from the layout; kept for booking history. */
-        retiredAt: (0, import_fields44.timestamp)(),
-        notes: (0, import_fields44.text)(),
+        retiredAt: (0, import_fields42.timestamp)(),
+        notes: (0, import_fields42.text)(),
         ...trackingFields
       }
     });
@@ -2872,8 +3249,8 @@ function documentToPlainText(value) {
   if (typeof value === "string") return value.trim() || null;
   if (typeof value !== "object") return null;
   const document4 = value.document;
-  const text43 = document4?.flatMap((node) => node.children ?? []).map((child) => typeof child.text === "string" ? child.text : "").join(" ").replace(/\s+/g, " ").trim();
-  return text43 || null;
+  const text42 = document4?.flatMap((node) => node.children ?? []).map((child) => typeof child.text === "string" ? child.text : "").join(" ").replace(/\s+/g, " ").trim();
+  return text42 || null;
 }
 function normalizePublicLimit(value) {
   if (!Number.isFinite(value)) return DEFAULT_LIST_LIMIT;
@@ -2916,8 +3293,8 @@ function normalizePublicMediaPath(value) {
 }
 function publicText(value, limit) {
   if (typeof value !== "string") return null;
-  const text43 = value.trim();
-  return text43 ? text43.slice(0, limit) : null;
+  const text42 = value.trim();
+  return text42 ? text42.slice(0, limit) : null;
 }
 function publicInternalHref(value) {
   return publicCtaHref(value);
@@ -2943,8 +3320,8 @@ function publicContactTopics(value) {
     if (!item || typeof item !== "object") return [];
     const title = publicText(item.title, 100);
     const details = Array.isArray(item.details) ? item.details.slice(0, 12).flatMap((detail) => {
-      const text43 = publicText(detail, 300);
-      return text43 ? [text43] : [];
+      const text42 = publicText(detail, 300);
+      return text42 ? [text42] : [];
     }) : [];
     return title && details.length ? [{ title, details }] : [];
   });
@@ -2956,8 +3333,8 @@ function publicFacilityHighlights(value) {
     const title = publicText(item.title, 200);
     const description = publicText(item.description, 1e3);
     const features = Array.isArray(item.features) ? item.features.slice(0, 20).flatMap((feature) => {
-      const text43 = publicText(feature, 100);
-      return text43 ? [text43] : [];
+      const text42 = publicText(feature, 100);
+      return text42 ? [text42] : [];
     }) : [];
     return title && description ? [{ title, description, features }] : [];
   });
@@ -3253,14 +3630,14 @@ async function getPublicStudioClassInstances(root, args, context) {
     { AND: [{ location: null }, { classSchedule: { location: { id: { equals: args.locationId } } } }] }
   ] });
   for (const term of String(args.search || "").trim().toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6)) {
-    const text43 = containsText(term.slice(0, 60));
+    const text42 = containsText(term.slice(0, 60));
     const levels = CLASS_LEVELS.filter((level) => level.startsWith(term));
     filters.push({ OR: [
-      { classSchedule: { name: text43 } },
-      { classSchedule: { classType: { name: text43 } } },
+      { classSchedule: { name: text42 } },
+      { classSchedule: { classType: { name: text42 } } },
       ...levels.length ? [{ classSchedule: { classType: { difficulty: { in: levels } } } }] : [],
-      { instructor: { user: { name: text43 } } },
-      { AND: [{ instructor: null }, { classSchedule: { instructor: { user: { name: text43 } } } }] }
+      { instructor: { user: { name: text42 } } },
+      { AND: [{ instructor: null }, { classSchedule: { instructor: { user: { name: text42 } } } }] }
     ] });
   }
   const records = await publicContext(context).query.ClassInstance.findMany({
@@ -3684,9 +4061,11 @@ async function markCapacityControlledAttendance(prisma, input) {
       if (!isDropInBooking(booking)) try {
         assertMembershipServiceEligibility(currentMember.user?.membership, booking.classInstance.date);
       } catch (error) {
-        const debit = await transaction.membershipCreditEntry.findUnique({ where: { key: `${booking.id}:debit` }, include: { grant: true } });
+        const debit = await transaction.creditEntry.findFirst({ where: { organizationId: input.actor.organizationId, eventKey: `${booking.id}:debit` }, include: { grant: true } });
         const membership = currentMember.user?.membership;
-        if (membership?.status !== "active" || !(error instanceof Error) || error.message !== "Service is outside the paid membership period" || debit?.grant?.membershipId !== membership.id || booking.classInstance.date < debit.grant.periodStart || booking.classInstance.date >= debit.grant.periodEnd) throw error;
+        const fromNonMembershipGrant = Boolean(debit?.grant && debit.grant.source !== "membership_period");
+        const fromThisPeriod = Boolean(debit?.grant?.membershipId && membership?.status === "active" && debit.grant.membershipId === membership.id && booking.classInstance.date >= debit.grant.validFrom && (!debit.grant.expiresAt || booking.classInstance.date < debit.grant.expiresAt));
+        if (!fromNonMembershipGrant && !(fromThisPeriod && error instanceof Error && error.message === "Service is outside the paid membership period")) throw error;
       }
       await assertParticipationAllowed(transaction, input.actor.organizationId, booking.memberId, booking.classInstance.date, booking.classInstance.locationId);
     }
@@ -4210,15 +4589,16 @@ async function ensureCustomer(input) {
   return customer.id;
 }
 function assertStripeMembershipPrice(price, input) {
-  const expectedInterval = input.billingCycle === "annual" ? "year" : "month";
+  const expected = periodInterval(input.billingCycle, input.billingPeriod);
+  const expectedInterval = expected.interval;
   const productId = typeof price.product === "string" ? price.product : price.product?.id;
   const productActive = Boolean(
     typeof price.product === "object" && price.product && !("deleted" in price.product && price.product.deleted) && "active" in price.product && price.product.active
   );
-  const valid = productActive && price.active && price.type === "recurring" && price.recurring?.interval === expectedInterval && price.recurring?.interval_count === 1 && price.unit_amount === input.amount && price.currency.toUpperCase() === input.currencyCode.toUpperCase() && (!input.productId || productId === input.productId);
+  const valid = productActive && price.active && price.type === "recurring" && price.recurring?.interval === expectedInterval && price.recurring?.interval_count === expected.count && price.unit_amount === input.amount && price.currency.toUpperCase() === input.currencyCode.toUpperCase() && (!input.productId || productId === input.productId);
   if (!valid) {
     throw new Error(
-      `Stripe ${input.billingCycle} Price must be active, recurring once per ${expectedInterval}, and match the configured plan amount, currency, and product.`
+      `Stripe ${input.billingCycle} Price must be active, recurring every ${expected.count} ${expectedInterval}, and match the configured plan amount, currency, and product.`
     );
   }
 }
@@ -4226,6 +4606,7 @@ var import_stripe, stripePaymentProviderAdapter;
 var init_stripe_adapter = __esm({
   "features/integrations/payment/stripe-adapter.ts"() {
     "use strict";
+    init_commercial_agreement();
     import_stripe = __toESM(require("stripe"));
     init_stripe_environment_provider();
     stripePaymentProviderAdapter = {
@@ -4448,7 +4829,7 @@ function s3ForcePathStyle(endpoint2) {
 
 // features/keystone/index.ts
 var import_auth2 = require("@keystone-6/auth");
-var import_core42 = require("@keystone-6/core");
+var import_core41 = require("@keystone-6/core");
 var import_config = require("dotenv/config");
 
 // features/keystone/models/Organization.ts
@@ -5371,108 +5752,7 @@ init_access();
 init_tenantPolicy();
 init_trackingFields();
 init_tenantRelationships();
-
-// features/integrations/payment/commercial-agreement.ts
-function decimalToMinor(value) {
-  const raw = String(value ?? "");
-  if (!/^(0|[1-9]\d*)(\.\d{1,2})?$/.test(raw)) throw new Error("Membership prices must use at most two decimal places");
-  const [whole, fraction = ""] = raw.split(".");
-  const amount = Number(whole) * 100 + Number(fraction.padEnd(2, "0"));
-  if (!Number.isSafeInteger(amount) || amount > 2147483647) throw new Error("Membership price exceeds supported minor units");
-  return amount;
-}
-function tierAmountMinor(tier, cycle) {
-  const stored = cycle === "annual" ? tier.annualPriceMinor : tier.monthlyPriceMinor;
-  const legacy = decimalToMinor(cycle === "annual" ? tier.annualPrice : tier.monthlyPrice);
-  if (stored == null) return legacy;
-  if (!Number.isSafeInteger(stored) || stored < 0 || stored !== legacy) throw new Error("Membership catalog amount requires reconciliation");
-  return stored;
-}
-function membershipTierChangeCurrency(agreementSnapshot, organizationDefaultCurrency, studioSettingsCurrency) {
-  const currency = (value) => typeof value === "string" ? value.trim().toUpperCase() : "";
-  const contractCurrency = currency(agreementSnapshot?.currencyCode);
-  const organizationCurrency = currency(organizationDefaultCurrency);
-  const settingsCurrency = currency(studioSettingsCurrency);
-  if (contractCurrency !== "USD") {
-    throw new Error("This membership agreement has no supported USD contract currency; reconcile its commercial evidence before changing tiers.");
-  }
-  if (organizationCurrency !== contractCurrency || settingsCurrency !== contractCurrency) {
-    throw new Error("Currency settings do not match this membership agreement; reconcile Organization and Store Settings before changing tiers.");
-  }
-  return contractCurrency;
-}
-function snapshotMembershipAgreement(tier, billingCycle, currencyCode, options = {}) {
-  return {
-    version: 1,
-    acceptedAt: (/* @__PURE__ */ new Date()).toISOString(),
-    tierId: tier.id,
-    tierName: tier.name,
-    billingCycle,
-    currencyCode,
-    amount: tierAmountMinor(tier, billingCycle),
-    // The exact provider price/product the member accepted; later catalog edits don't change it.
-    ...options.providerPriceId ? { providerPriceId: options.providerPriceId, providerProductId: options.providerProductId || null } : {},
-    monthlyPriceMinor: tierAmountMinor(tier, "monthly"),
-    annualPriceMinor: tierAmountMinor(tier, "annual"),
-    classCreditsPerMonth: tier.classCreditsPerMonth,
-    ...options.initialCreditLedger ? { creditLedgerPolicy: "monthly-grant-v1" } : {},
-    freezeAllowed: Boolean(tier.freezeAllowed),
-    contractLength: tier.contractLength ?? 0,
-    cancellationPolicy: "paid_period_end",
-    guestPasses: tier.guestPasses ?? 0,
-    maxClassBookings: tier.maxClassBookings ?? 0,
-    personalTrainingSessions: tier.personalTrainingSessions ?? 0
-  };
-}
-function acceptedProviderPrice(agreement, fallbacks) {
-  const amount = Number.isSafeInteger(agreement?.amount) ? agreement.amount : null;
-  const text43 = (value) => typeof value === "string" && value ? value : null;
-  if (text43(agreement?.providerPriceId)) return { priceId: agreement.providerPriceId, productId: text43(agreement.providerProductId), amount, basis: "agreement" };
-  if (text43(fallbacks.checkoutPriceId)) return { priceId: fallbacks.checkoutPriceId, productId: text43(fallbacks.checkoutProductId), amount, basis: "checkout" };
-  if (text43(fallbacks.tierPriceId)) return { priceId: fallbacks.tierPriceId, productId: null, amount, basis: "catalog" };
-  return null;
-}
-var providerId = (value) => typeof value === "string" ? value : value?.id || null;
-var cycleInterval = (billingCycle) => billingCycle === "annual" ? "year" : "month";
-function priceProblem(price, quantity, accepted, billingCycle) {
-  if (price?.id !== accepted.priceId) return `bills price ${price?.id || "none"} instead of the accepted ${accepted.priceId}`;
-  if (accepted.productId && providerId(price?.product) && providerId(price.product) !== accepted.productId) return "bills a different product";
-  if ((quantity ?? 1) !== 1) return `bills quantity ${quantity}`;
-  if (String(price?.currency || "").toUpperCase() !== "USD") return "bills a currency other than USD";
-  if (price?.recurring && (price.recurring.interval !== cycleInterval(billingCycle) || (price.recurring.interval_count ?? 1) !== 1)) return `bills every ${price.recurring.interval_count ?? 1} ${price.recurring.interval} instead of the accepted ${billingCycle} cycle`;
-  if (accepted.amount !== null && Number.isSafeInteger(price?.unit_amount) && price.unit_amount !== accepted.amount) return "bills a different amount than the accepted agreement";
-  return null;
-}
-function subscriptionItemsProblem(subscription, accepted, billingCycle) {
-  if (!accepted) return "no accepted provider price is recorded for this membership";
-  const items = subscription?.items?.data || [];
-  if (items.length !== 1) return `has ${items.length} billed items instead of one`;
-  return priceProblem(items[0].price, items[0].quantity, accepted, billingCycle);
-}
-function invoiceServiceProblem(invoice, accepted, billingCycle) {
-  if (!accepted) return "no accepted provider price is recorded for this membership";
-  const lines = (invoice?.lines?.data || []).filter((line2) => line2.type === "subscription" && !line2.proration);
-  if (lines.length !== 1) return `has ${lines.length} recurring service lines instead of one`;
-  const line = lines[0];
-  const problem = priceProblem(line.price, line.quantity, accepted, billingCycle);
-  if (problem) return problem;
-  if (!Number.isSafeInteger(line.amount) || line.amount <= 0) return "has no positive amount for its service line";
-  const start = line.period?.start, end = line.period?.end;
-  if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start) return "has an invalid service period";
-  const days = (end - start) / 86400;
-  if (billingCycle === "annual" ? days < 364 || days > 367 : days < 27 || days > 32) return `covers ${Math.round(days)} days, not one ${billingCycle === "annual" ? "year" : "month"}`;
-  return null;
-}
-function assertCheckoutCorrelation(local, session, organizationId) {
-  if (!local || local.organization?.id !== organizationId) throw new Error("Local payment session not found in organization");
-  const metadata = session.metadata || {};
-  const legacyAttemptKey = `${local.idempotencyKey}:attempt:${local.data?.checkoutAttempt}`;
-  if (metadata.paymentSessionKey !== local.idempotencyKey && metadata.paymentSessionKey !== legacyAttemptKey) throw new Error("Checkout attempt does not match local payment session");
-  if (local.providerSessionId && local.providerSessionId !== session.id) throw new Error("Provider checkout session does not match local attempt");
-  if (local.user?.id !== metadata.userId || local.membershipTier?.id !== metadata.tierId || local.billingCycle !== metadata.billingCycle) throw new Error("Checkout ownership or commercial metadata does not match");
-  if (Number(metadata.amount) !== local.amount || String(metadata.currencyCode).toUpperCase() !== local.currencyCode || String(session.currency).toUpperCase() !== local.currencyCode) throw new Error("Checkout amount or currency does not match local agreement");
-  if (session.status !== "complete" || !["paid", "no_payment_required"].includes(session.payment_status)) throw new Error("Checkout payment is not settled");
-}
+init_commercial_agreement();
 
 // lib/class-credits.ts
 var UNLIMITED_CLASS_CREDITS = -1;
@@ -5658,6 +5938,26 @@ var MembershipTier = (0, import_core5.list)({
       }
     }),
     // Stripe integration
+    // Dissertation D10. The billed period of the recurring ("monthly") Stripe price: week, fortnight,
+    // four weeks or calendar month. classCreditsPerMonth is the allowance per billed period (-1 unlimited).
+    billingPeriod: (0, import_fields6.select)({
+      type: "string",
+      options: [{ label: "Weekly", value: "week" }, { label: "Fortnightly", value: "fortnight" }, { label: "Every 4 weeks", value: "four_weeks" }, { label: "Monthly", value: "month" }],
+      defaultValue: "month",
+      validation: { isRequired: true }
+    }),
+    maxBookingsPerDay: (0, import_fields6.integer)({ defaultValue: 0, validation: { min: 0, max: 20 }, ui: { description: "0 = no daily cap. 'Unlimited' is commonly 1 a day." } }),
+    maxBookingsPerMonth: (0, import_fields6.integer)({ defaultValue: 0, validation: { min: 0, max: 1e3 }, ui: { description: "0 = no monthly cap; counts attended and upcoming bookings in the calendar month" } }),
+    cancelNoticeDays: (0, import_fields6.integer)({ defaultValue: 30, validation: { min: 0, max: 365 } }),
+    freezeMinDays: (0, import_fields6.integer)({ defaultValue: 7, validation: { min: 1, max: 365 } }),
+    freezeMaxDays: (0, import_fields6.integer)({ defaultValue: 30, validation: { min: 1, max: 365 } }),
+    freezeDaysPerYear: (0, import_fields6.integer)({ defaultValue: 30, validation: { min: 0, max: 365 } }),
+    freezeFee: (0, import_fields6.integer)({ defaultValue: 0, validation: { min: 0, max: 1e5 }, ui: { description: "Cents, charged at the desk or on the next invoice" } }),
+    advanceBookingDays: (0, import_fields6.integer)({ defaultValue: 14, validation: { min: 1, max: 90 }, ui: { description: "How many days ahead a member on this plan can book" } }),
+    offPeakOnly: (0, import_fields6.checkbox)({ defaultValue: false }),
+    /** Off-peak windows: [{ days: [1..7], from: "HH:MM", to: "HH:MM" }] in the studio's time zone. */
+    offPeakWindows: (0, import_fields6.json)({ defaultValue: [{ days: [1, 2, 3, 4, 5], from: "09:00", to: "16:00" }, { days: [6, 7], from: "12:00", to: "21:00" }] }),
+    rolloverPeriods: (0, import_fields6.integer)({ defaultValue: 0, validation: { min: 0, max: 1 }, ui: { description: "Unused credits roll over one period (0 or 1)" } }),
     stripeMonthlyPriceId: (0, import_fields6.text)({
       access: { read: permissions.canManageAllRecords },
       isFilterable: permissions.canManageAllRecords,
@@ -8245,12 +8545,12 @@ async function upsertStudioSettings(root, { data, expectedUpdatedAt }, context) 
   });
   return saved;
 }
-async function publishStudioParticipationTerms(_root, { text: text43, expectedPolicyId }, context) {
+async function publishStudioParticipationTerms(_root, { text: text42, expectedPolicyId }, context) {
   const session = context.session;
   const organizationId = getTenantId(session);
   if (!session?.itemId || !organizationId) throw new Error("Authentication required");
-  if (typeof text43 !== "string") throw new Error("Participation terms must be text");
-  const body = text43.trim();
+  if (typeof text42 !== "string") throw new Error("Participation terms must be text");
+  const body = text42.trim();
   if (body.length > PARTICIPATION_TERMS_MAX_LENGTH) throw new Error(`Participation terms must be ${PARTICIPATION_TERMS_MAX_LENGTH.toLocaleString("en-US")} characters or fewer`);
   return publishTermsForOrganization(context, organizationId, String(session.itemId), body, expectedPolicyId ?? null, { requirePolicyAuthority: true });
 }
@@ -9232,124 +9532,83 @@ var IntegrationCredential = (0, import_core30.list)({ access, fields: {
   ...trackingFields
 } });
 
-// features/keystone/models/MembershipCreditGrant.ts
+// features/keystone/models/TrainingPackage.ts
 var import_core31 = require("@keystone-6/core");
 var import_access54 = require("@keystone-6/core/access");
 var import_fields34 = require("@keystone-6/core/fields");
 init_access();
 init_tenantPolicy();
 init_trackingFields();
-var MembershipCreditGrant = (0, import_core31.list)({
-  access: { operation: { query: permissions.canManageAllRecords, create: import_access54.denyAll, update: import_access54.denyAll, delete: import_access54.denyAll }, filter: { query: tenantFilter } },
+init_tenantRelationships();
+var TrainingPackage = (0, import_core31.list)({
+  db: { extendPrismaSchema: compoundUniqueDb("organizationId, purchaseReference") },
+  access: {
+    operation: { query: isSignedIn, create: import_access54.denyAll, update: import_access54.denyAll, delete: import_access54.denyAll },
+    filter: { query: ({ session }) => tenantFilter({ session }, canManageTenant({ session }, "canManageAppointments") ? void 0 : { member: { user: { id: { equals: session?.itemId } } } }) }
+  },
   fields: {
-    organization: (0, import_fields34.relationship)({ ref: "Organization" }),
-    key: (0, import_fields34.text)({ isIndexed: "unique", validation: { isRequired: true } }),
-    membership: (0, import_fields34.relationship)({ ref: "Membership" }),
-    periodStart: (0, import_fields34.timestamp)({ validation: { isRequired: true } }),
-    periodEnd: (0, import_fields34.timestamp)({ validation: { isRequired: true } }),
-    allowance: (0, import_fields34.integer)({ validation: { isRequired: true } }),
-    remaining: (0, import_fields34.integer)({ validation: { isRequired: true } }),
+    organization: (0, import_fields34.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
+    member: (0, import_fields34.relationship)({ ref: "Member", db: { extendPrismaSchema: requiredRelationshipDb("member") } }),
+    location: (0, import_fields34.relationship)({ ref: "Location", db: { extendPrismaSchema: requiredRelationshipDb("location") } }),
+    serviceName: (0, import_fields34.text)({ validation: { isRequired: true } }),
+    durationMinutes: (0, import_fields34.integer)({ validation: { isRequired: true, min: 15, max: 480 } }),
+    totalCredits: (0, import_fields34.integer)({ validation: { isRequired: true, min: 1, max: 1e3 } }),
+    creditsRemaining: (0, import_fields34.integer)({ validation: { isRequired: true, min: 0 } }),
+    amount: (0, import_fields34.integer)({ validation: { isRequired: true, min: 1 } }),
+    currencyCode: (0, import_fields34.text)({ defaultValue: "USD" }),
+    purchaseReference: (0, import_fields34.text)({ validation: { isRequired: true } }),
+    purchasedAt: (0, import_fields34.timestamp)({ validation: { isRequired: true } }),
+    expiresAt: (0, import_fields34.timestamp)({ validation: { isRequired: true } }),
+    recordedBy: (0, import_fields34.relationship)({ ref: "User" }),
+    status: (0, import_fields34.select)({ options: ["active", "refunded"], defaultValue: "active", validation: { isRequired: true } }),
+    refundAmount: (0, import_fields34.integer)({ defaultValue: 0 }),
+    refundReference: (0, import_fields34.text)(),
+    refundedAt: (0, import_fields34.timestamp)(),
+    terms: (0, import_fields34.json)({ defaultValue: {} }),
     ...trackingFields
   }
 });
 
-// features/keystone/models/MembershipCreditEntry.ts
+// features/keystone/models/TrainingCreditEntry.ts
 var import_core32 = require("@keystone-6/core");
 var import_access56 = require("@keystone-6/core/access");
 var import_fields35 = require("@keystone-6/core/fields");
 init_access();
 init_tenantPolicy();
 init_trackingFields();
-var MembershipCreditEntry = (0, import_core32.list)({
-  access: { operation: { query: permissions.canManageAllRecords, create: import_access56.denyAll, update: import_access56.denyAll, delete: import_access56.denyAll }, filter: { query: tenantFilter } },
-  fields: {
-    organization: (0, import_fields35.relationship)({ ref: "Organization" }),
-    key: (0, import_fields35.text)({ isIndexed: "unique", validation: { isRequired: true } }),
-    grant: (0, import_fields35.relationship)({ ref: "MembershipCreditGrant" }),
-    booking: (0, import_fields35.relationship)({ ref: "ClassBooking" }),
-    delta: (0, import_fields35.integer)({ validation: { isRequired: true } }),
-    kind: (0, import_fields35.text)({ validation: { isRequired: true } }),
-    ...trackingFields
-  }
-});
-
-// features/keystone/models/TrainingPackage.ts
-var import_core33 = require("@keystone-6/core");
-var import_access58 = require("@keystone-6/core/access");
-var import_fields36 = require("@keystone-6/core/fields");
-init_access();
-init_tenantPolicy();
-init_trackingFields();
 init_tenantRelationships();
-var TrainingPackage = (0, import_core33.list)({
-  db: { extendPrismaSchema: compoundUniqueDb("organizationId, purchaseReference") },
-  access: {
-    operation: { query: isSignedIn, create: import_access58.denyAll, update: import_access58.denyAll, delete: import_access58.denyAll },
-    filter: { query: ({ session }) => tenantFilter({ session }, canManageTenant({ session }, "canManageAppointments") ? void 0 : { member: { user: { id: { equals: session?.itemId } } } }) }
-  },
-  fields: {
-    organization: (0, import_fields36.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
-    member: (0, import_fields36.relationship)({ ref: "Member", db: { extendPrismaSchema: requiredRelationshipDb("member") } }),
-    location: (0, import_fields36.relationship)({ ref: "Location", db: { extendPrismaSchema: requiredRelationshipDb("location") } }),
-    serviceName: (0, import_fields36.text)({ validation: { isRequired: true } }),
-    durationMinutes: (0, import_fields36.integer)({ validation: { isRequired: true, min: 15, max: 480 } }),
-    totalCredits: (0, import_fields36.integer)({ validation: { isRequired: true, min: 1, max: 1e3 } }),
-    creditsRemaining: (0, import_fields36.integer)({ validation: { isRequired: true, min: 0 } }),
-    amount: (0, import_fields36.integer)({ validation: { isRequired: true, min: 1 } }),
-    currencyCode: (0, import_fields36.text)({ defaultValue: "USD" }),
-    purchaseReference: (0, import_fields36.text)({ validation: { isRequired: true } }),
-    purchasedAt: (0, import_fields36.timestamp)({ validation: { isRequired: true } }),
-    expiresAt: (0, import_fields36.timestamp)({ validation: { isRequired: true } }),
-    recordedBy: (0, import_fields36.relationship)({ ref: "User" }),
-    status: (0, import_fields36.select)({ options: ["active", "refunded"], defaultValue: "active", validation: { isRequired: true } }),
-    refundAmount: (0, import_fields36.integer)({ defaultValue: 0 }),
-    refundReference: (0, import_fields36.text)(),
-    refundedAt: (0, import_fields36.timestamp)(),
-    terms: (0, import_fields36.json)({ defaultValue: {} }),
-    ...trackingFields
-  }
-});
-
-// features/keystone/models/TrainingCreditEntry.ts
-var import_core34 = require("@keystone-6/core");
-var import_access60 = require("@keystone-6/core/access");
-var import_fields37 = require("@keystone-6/core/fields");
-init_access();
-init_tenantPolicy();
-init_trackingFields();
-init_tenantRelationships();
-var TrainingCreditEntry = (0, import_core34.list)({
+var TrainingCreditEntry = (0, import_core32.list)({
   db: { extendPrismaSchema: compoundUniqueDb("organizationId, eventKey") },
   access: {
-    operation: { query: isSignedIn, create: import_access60.denyAll, update: import_access60.denyAll, delete: import_access60.denyAll },
+    operation: { query: isSignedIn, create: import_access56.denyAll, update: import_access56.denyAll, delete: import_access56.denyAll },
     filter: { query: ({ session }) => tenantFilter({ session }, canManageTenant({ session }, "canManageAppointments") ? void 0 : { trainingPackage: { member: { user: { id: { equals: session?.itemId } } } } }) }
   },
   fields: {
-    organization: (0, import_fields37.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
-    trainingPackage: (0, import_fields37.relationship)({ ref: "TrainingPackage", db: { extendPrismaSchema: requiredRelationshipDb("trainingPackage") } }),
-    appointment: (0, import_fields37.relationship)({ ref: "Appointment" }),
-    eventKey: (0, import_fields37.text)({ validation: { isRequired: true } }),
-    kind: (0, import_fields37.select)({ options: ["issued", "reserved", "restored", "refunded", "refund_reserved", "refund_released"], validation: { isRequired: true } }),
-    quantity: (0, import_fields37.integer)({ validation: { isRequired: true } }),
-    balanceAfter: (0, import_fields37.integer)({ validation: { isRequired: true, min: 0 } }),
-    actor: (0, import_fields37.relationship)({ ref: "User" }),
-    reason: (0, import_fields37.text)(),
+    organization: (0, import_fields35.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
+    trainingPackage: (0, import_fields35.relationship)({ ref: "TrainingPackage", db: { extendPrismaSchema: requiredRelationshipDb("trainingPackage") } }),
+    appointment: (0, import_fields35.relationship)({ ref: "Appointment" }),
+    eventKey: (0, import_fields35.text)({ validation: { isRequired: true } }),
+    kind: (0, import_fields35.select)({ options: ["issued", "reserved", "restored", "refunded", "refund_reserved", "refund_released"], validation: { isRequired: true } }),
+    quantity: (0, import_fields35.integer)({ validation: { isRequired: true } }),
+    balanceAfter: (0, import_fields35.integer)({ validation: { isRequired: true, min: 0 } }),
+    actor: (0, import_fields35.relationship)({ ref: "User" }),
+    reason: (0, import_fields35.text)(),
     ...trackingFields
   }
 });
 
 // features/keystone/models/ContactMessage.ts
-var import_core35 = require("@keystone-6/core");
-var import_access62 = require("@keystone-6/core/access");
-var import_fields38 = require("@keystone-6/core/fields");
+var import_core33 = require("@keystone-6/core");
+var import_access58 = require("@keystone-6/core/access");
+var import_fields36 = require("@keystone-6/core/fields");
 init_tenantPolicy();
 init_trackingFields();
 init_tenantRelationships();
 var canManageMessages = (args) => canManageTenant(args, "canManageCommunications");
-var readOnly = { create: import_access62.denyAll, update: import_access62.denyAll };
-var ContactMessage = (0, import_core35.list)({
+var readOnly = { create: import_access58.denyAll, update: import_access58.denyAll };
+var ContactMessage = (0, import_core33.list)({
   access: {
-    operation: { query: canManageMessages, create: import_access62.denyAll, update: canManageMessages, delete: canManageMessages },
+    operation: { query: canManageMessages, create: import_access58.denyAll, update: canManageMessages, delete: canManageMessages },
     filter: { query: tenantFilter, update: tenantFilter, delete: tenantFilter },
     item: { update: (args) => tenantItemAccess(args), delete: (args) => tenantItemAccess(args) }
   },
@@ -9361,21 +9620,21 @@ var ContactMessage = (0, import_core35.list)({
     }
   },
   fields: {
-    organization: (0, import_fields38.relationship)({
+    organization: (0, import_fields36.relationship)({
       ref: "Organization",
       access: readOnly,
       graphql: { isNonNull: { read: true } },
       db: { extendPrismaSchema: requiredRelationshipDb("organization") }
     }),
-    subject: (0, import_fields38.text)({ access: readOnly, ui: { itemView: { fieldMode: "read" } } }),
-    reference: (0, import_fields38.text)({ access: readOnly, isIndexed: true, ui: { itemView: { fieldMode: "read" } } }),
-    name: (0, import_fields38.text)({ access: readOnly, validation: { isRequired: true }, ui: { itemView: { fieldMode: "read" } } }),
-    email: (0, import_fields38.text)({ access: readOnly, validation: { isRequired: true }, ui: { description: "Reply from the club's own email to this address, then set Status to Replied. Studio does not send replies.", itemView: { fieldMode: "read" } } }),
-    phone: (0, import_fields38.text)({ access: readOnly, ui: { itemView: { fieldMode: "read" } } }),
-    topic: (0, import_fields38.text)({ access: readOnly, ui: { itemView: { fieldMode: "read" } } }),
-    message: (0, import_fields38.text)({ access: readOnly, validation: { isRequired: true }, ui: { displayMode: "textarea", itemView: { fieldMode: "read" } } }),
-    sourcePath: (0, import_fields38.text)({ access: readOnly, ui: { description: "Storefront page the message was sent from", itemView: { fieldMode: "read" } } }),
-    status: (0, import_fields38.select)({
+    subject: (0, import_fields36.text)({ access: readOnly, ui: { itemView: { fieldMode: "read" } } }),
+    reference: (0, import_fields36.text)({ access: readOnly, isIndexed: true, ui: { itemView: { fieldMode: "read" } } }),
+    name: (0, import_fields36.text)({ access: readOnly, validation: { isRequired: true }, ui: { itemView: { fieldMode: "read" } } }),
+    email: (0, import_fields36.text)({ access: readOnly, validation: { isRequired: true }, ui: { description: "Reply from the club's own email to this address, then set Status to Replied. Studio does not send replies.", itemView: { fieldMode: "read" } } }),
+    phone: (0, import_fields36.text)({ access: readOnly, ui: { itemView: { fieldMode: "read" } } }),
+    topic: (0, import_fields36.text)({ access: readOnly, ui: { itemView: { fieldMode: "read" } } }),
+    message: (0, import_fields36.text)({ access: readOnly, validation: { isRequired: true }, ui: { displayMode: "textarea", itemView: { fieldMode: "read" } } }),
+    sourcePath: (0, import_fields36.text)({ access: readOnly, ui: { description: "Storefront page the message was sent from", itemView: { fieldMode: "read" } } }),
+    status: (0, import_fields36.select)({
       type: "string",
       options: [
         { label: "New", value: "new" },
@@ -9387,28 +9646,28 @@ var ContactMessage = (0, import_core35.list)({
       validation: { isRequired: true },
       ui: { displayMode: "segmented-control", description: "Replied: staff answered by email, phone or in person. Staff can't reset passwords; point sign-in requests to Forgot password on the storefront." }
     }),
-    staffNotes: (0, import_fields38.text)({ ui: { displayMode: "textarea", description: "Internal notes; never shown to the sender" } }),
+    staffNotes: (0, import_fields36.text)({ ui: { displayMode: "textarea", description: "Internal notes; never shown to the sender" } }),
     ...trackingFields
   }
 });
 
 // features/keystone/models/GiftCard.ts
-var import_core36 = require("@keystone-6/core");
-var import_access63 = require("@keystone-6/core/access");
-var import_fields39 = require("@keystone-6/core/fields");
+var import_core34 = require("@keystone-6/core");
+var import_access59 = require("@keystone-6/core/access");
+var import_fields37 = require("@keystone-6/core/fields");
 init_tenantPolicy();
 init_tenantRelationships();
 init_trackingFields();
-var GiftCard = (0, import_core36.list)({
+var GiftCard = (0, import_core34.list)({
   access: {
-    operation: { query: (args) => canManageTenant(args, "canManageRetail"), create: import_access63.denyAll, update: import_access63.denyAll, delete: import_access63.denyAll },
+    operation: { query: (args) => canManageTenant(args, "canManageRetail"), create: import_access59.denyAll, update: import_access59.denyAll, delete: import_access59.denyAll },
     filter: { query: tenantFilter }
   },
   ui: { hideCreate: true, hideDelete: true, listView: { initialColumns: ["code", "status", "initialValue", "balance", "recipientName", "expiresAt"] } },
   fields: {
-    organization: (0, import_fields39.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
-    code: (0, import_fields39.text)({ isIndexed: "unique", validation: { isRequired: true } }),
-    status: (0, import_fields39.select)({
+    organization: (0, import_fields37.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
+    code: (0, import_fields37.text)({ isIndexed: "unique", validation: { isRequired: true } }),
+    status: (0, import_fields37.select)({
       type: "string",
       options: [
         { label: "Active", value: "active" },
@@ -9418,98 +9677,98 @@ var GiftCard = (0, import_core36.list)({
       defaultValue: "active",
       validation: { isRequired: true }
     }),
-    initialValue: (0, import_fields39.integer)({ validation: { isRequired: true, min: 0 } }),
-    balance: (0, import_fields39.integer)({ validation: { isRequired: true, min: 0 } }),
-    purchaserName: (0, import_fields39.text)(),
-    purchaserEmail: (0, import_fields39.text)(),
-    recipientName: (0, import_fields39.text)(),
-    recipientEmail: (0, import_fields39.text)(),
-    message: (0, import_fields39.text)({ ui: { displayMode: "textarea" } }),
-    paymentSession: (0, import_fields39.relationship)({ ref: "PaymentSession" }),
-    stripePaymentIntentId: (0, import_fields39.text)(),
-    expiresAt: (0, import_fields39.timestamp)(),
-    activatedAt: (0, import_fields39.timestamp)(),
-    emailedAt: (0, import_fields39.timestamp)(),
-    refundedAt: (0, import_fields39.timestamp)(),
-    ledger: (0, import_fields39.json)({ defaultValue: [] }),
+    initialValue: (0, import_fields37.integer)({ validation: { isRequired: true, min: 0 } }),
+    balance: (0, import_fields37.integer)({ validation: { isRequired: true, min: 0 } }),
+    purchaserName: (0, import_fields37.text)(),
+    purchaserEmail: (0, import_fields37.text)(),
+    recipientName: (0, import_fields37.text)(),
+    recipientEmail: (0, import_fields37.text)(),
+    message: (0, import_fields37.text)({ ui: { displayMode: "textarea" } }),
+    paymentSession: (0, import_fields37.relationship)({ ref: "PaymentSession" }),
+    stripePaymentIntentId: (0, import_fields37.text)(),
+    expiresAt: (0, import_fields37.timestamp)(),
+    activatedAt: (0, import_fields37.timestamp)(),
+    emailedAt: (0, import_fields37.timestamp)(),
+    refundedAt: (0, import_fields37.timestamp)(),
+    ledger: (0, import_fields37.json)({ defaultValue: [] }),
     ...trackingFields
   }
 });
 
 // features/keystone/models/MemberImportRecord.ts
-var import_core37 = require("@keystone-6/core");
-var import_access64 = require("@keystone-6/core/access");
-var import_fields40 = require("@keystone-6/core/fields");
+var import_core35 = require("@keystone-6/core");
+var import_access60 = require("@keystone-6/core/access");
+var import_fields38 = require("@keystone-6/core/fields");
 init_access();
 init_tenantPolicy();
 init_trackingFields();
 init_tenantRelationships();
-var MemberImportRecord = (0, import_core37.list)({
-  access: { operation: { query: permissions.canManagePeople, create: import_access64.denyAll, update: import_access64.denyAll, delete: import_access64.denyAll }, filter: { query: tenantFilter } },
+var MemberImportRecord = (0, import_core35.list)({
+  access: { operation: { query: permissions.canManagePeople, create: import_access60.denyAll, update: import_access60.denyAll, delete: import_access60.denyAll }, filter: { query: tenantFilter } },
   hooks: { validateInput: validateTenantOwnership([{ field: "member", list: "member" }]) },
   fields: {
-    organization: (0, import_fields40.relationship)({ ref: "Organization", access: { update: import_access64.denyAll }, db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
-    key: (0, import_fields40.text)({ isIndexed: "unique", validation: { isRequired: true } }),
-    source: (0, import_fields40.text)({ validation: { isRequired: true } }),
-    externalId: (0, import_fields40.text)({ validation: { isRequired: true } }),
-    payloadHash: (0, import_fields40.text)({ validation: { isRequired: true } }),
-    status: (0, import_fields40.select)({ options: ["processing", "completed", "failed"], defaultValue: "processing" }),
-    member: (0, import_fields40.relationship)({ ref: "Member" }),
-    lastError: (0, import_fields40.text)(),
-    completedAt: (0, import_fields40.timestamp)(),
+    organization: (0, import_fields38.relationship)({ ref: "Organization", access: { update: import_access60.denyAll }, db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
+    key: (0, import_fields38.text)({ isIndexed: "unique", validation: { isRequired: true } }),
+    source: (0, import_fields38.text)({ validation: { isRequired: true } }),
+    externalId: (0, import_fields38.text)({ validation: { isRequired: true } }),
+    payloadHash: (0, import_fields38.text)({ validation: { isRequired: true } }),
+    status: (0, import_fields38.select)({ options: ["processing", "completed", "failed"], defaultValue: "processing" }),
+    member: (0, import_fields38.relationship)({ ref: "Member" }),
+    lastError: (0, import_fields38.text)(),
+    completedAt: (0, import_fields38.timestamp)(),
     ...trackingFields
   }
 });
 
 // features/keystone/models/RetailModels.ts
-var import_core38 = require("@keystone-6/core");
-var import_access66 = require("@keystone-6/core/access");
-var import_fields41 = require("@keystone-6/core/fields");
+var import_core36 = require("@keystone-6/core");
+var import_access62 = require("@keystone-6/core/access");
+var import_fields39 = require("@keystone-6/core/fields");
 init_tenantPolicy();
 init_tenantRelationships();
 init_trackingFields();
-var access2 = { operation: { query: (args) => canManageTenant(args, "canManageRetail"), create: import_access66.denyAll, update: import_access66.denyAll, delete: import_access66.denyAll }, filter: { query: tenantFilter } };
-var organization2 = () => (0, import_fields41.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } });
-var location = () => (0, import_fields41.relationship)({ ref: "Location", db: { extendPrismaSchema: requiredRelationshipDb("location") } });
-var RetailItem = (0, import_core38.list)({
+var access2 = { operation: { query: (args) => canManageTenant(args, "canManageRetail"), create: import_access62.denyAll, update: import_access62.denyAll, delete: import_access62.denyAll }, filter: { query: tenantFilter } };
+var organization2 = () => (0, import_fields39.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } });
+var location = () => (0, import_fields39.relationship)({ ref: "Location", db: { extendPrismaSchema: requiredRelationshipDb("location") } });
+var RetailItem = (0, import_core36.list)({
   access: access2,
   db: { extendPrismaSchema: compoundUniqueDb("organizationId, locationId, sku") },
-  fields: { organization: organization2(), location: location(), sku: (0, import_fields41.text)({ validation: { isRequired: true } }), name: (0, import_fields41.text)({ validation: { isRequired: true } }), unitAmount: (0, import_fields41.integer)({ validation: { isRequired: true, min: 0 } }), currencyCode: (0, import_fields41.text)({ defaultValue: "USD" }), stockOnHand: (0, import_fields41.integer)({ defaultValue: 0, validation: { min: 0 } }), isActive: (0, import_fields41.checkbox)({ defaultValue: true }), ...trackingFields }
+  fields: { organization: organization2(), location: location(), sku: (0, import_fields39.text)({ validation: { isRequired: true } }), name: (0, import_fields39.text)({ validation: { isRequired: true } }), unitAmount: (0, import_fields39.integer)({ validation: { isRequired: true, min: 0 } }), currencyCode: (0, import_fields39.text)({ defaultValue: "USD" }), stockOnHand: (0, import_fields39.integer)({ defaultValue: 0, validation: { min: 0 } }), isActive: (0, import_fields39.checkbox)({ defaultValue: true }), ...trackingFields }
 });
-var RetailSale = (0, import_core38.list)({
+var RetailSale = (0, import_core36.list)({
   access: access2,
   db: { extendPrismaSchema: compoundUniqueDb("organizationId, requestKey") },
-  fields: { organization: organization2(), location: location(), requestKey: (0, import_fields41.text)({ validation: { isRequired: true } }), requestHash: (0, import_fields41.text)({ validation: { isRequired: true } }), lines: (0, import_fields41.json)({ defaultValue: [] }), totalAmount: (0, import_fields41.integer)({ validation: { isRequired: true, min: 0 } }), currencyCode: (0, import_fields41.text)({ defaultValue: "USD" }), tender: (0, import_fields41.text)({ validation: { isRequired: true } }), paymentReference: (0, import_fields41.text)(), soldAt: (0, import_fields41.timestamp)({ validation: { isRequired: true } }), recordedBy: (0, import_fields41.relationship)({ ref: "User" }), ...trackingFields }
+  fields: { organization: organization2(), location: location(), requestKey: (0, import_fields39.text)({ validation: { isRequired: true } }), requestHash: (0, import_fields39.text)({ validation: { isRequired: true } }), lines: (0, import_fields39.json)({ defaultValue: [] }), totalAmount: (0, import_fields39.integer)({ validation: { isRequired: true, min: 0 } }), currencyCode: (0, import_fields39.text)({ defaultValue: "USD" }), tender: (0, import_fields39.text)({ validation: { isRequired: true } }), paymentReference: (0, import_fields39.text)(), soldAt: (0, import_fields39.timestamp)({ validation: { isRequired: true } }), recordedBy: (0, import_fields39.relationship)({ ref: "User" }), ...trackingFields }
 });
-var RetailReturn = (0, import_core38.list)({
+var RetailReturn = (0, import_core36.list)({
   access: access2,
   db: { extendPrismaSchema: compoundUniqueDb("organizationId, requestKey") },
-  fields: { organization: organization2(), location: location(), sale: (0, import_fields41.relationship)({ ref: "RetailSale", db: { extendPrismaSchema: requiredRelationshipDb("sale") } }), requestKey: (0, import_fields41.text)({ validation: { isRequired: true } }), requestHash: (0, import_fields41.text)({ validation: { isRequired: true } }), lines: (0, import_fields41.json)({ defaultValue: [] }), refundAmount: (0, import_fields41.integer)({ validation: { isRequired: true, min: 0 } }), refundReference: (0, import_fields41.text)(), tender: (0, import_fields41.text)({ validation: { isRequired: true } }), reason: (0, import_fields41.text)({ validation: { isRequired: true } }), returnedAt: (0, import_fields41.timestamp)({ validation: { isRequired: true } }), recordedBy: (0, import_fields41.relationship)({ ref: "User" }), ...trackingFields }
+  fields: { organization: organization2(), location: location(), sale: (0, import_fields39.relationship)({ ref: "RetailSale", db: { extendPrismaSchema: requiredRelationshipDb("sale") } }), requestKey: (0, import_fields39.text)({ validation: { isRequired: true } }), requestHash: (0, import_fields39.text)({ validation: { isRequired: true } }), lines: (0, import_fields39.json)({ defaultValue: [] }), refundAmount: (0, import_fields39.integer)({ validation: { isRequired: true, min: 0 } }), refundReference: (0, import_fields39.text)(), tender: (0, import_fields39.text)({ validation: { isRequired: true } }), reason: (0, import_fields39.text)({ validation: { isRequired: true } }), returnedAt: (0, import_fields39.timestamp)({ validation: { isRequired: true } }), recordedBy: (0, import_fields39.relationship)({ ref: "User" }), ...trackingFields }
 });
-var RetailStockEntry = (0, import_core38.list)({
+var RetailStockEntry = (0, import_core36.list)({
   access: access2,
   db: { extendPrismaSchema: compoundUniqueDb("organizationId, eventKey") },
-  fields: { organization: organization2(), location: location(), item: (0, import_fields41.relationship)({ ref: "RetailItem", db: { extendPrismaSchema: requiredRelationshipDb("item") } }), eventKey: (0, import_fields41.text)({ validation: { isRequired: true } }), requestHash: (0, import_fields41.text)(), quantity: (0, import_fields41.integer)({ validation: { isRequired: true } }), balanceAfter: (0, import_fields41.integer)({ validation: { isRequired: true, min: 0 } }), reason: (0, import_fields41.text)({ validation: { isRequired: true } }), recordedBy: (0, import_fields41.relationship)({ ref: "User" }), ...trackingFields }
+  fields: { organization: organization2(), location: location(), item: (0, import_fields39.relationship)({ ref: "RetailItem", db: { extendPrismaSchema: requiredRelationshipDb("item") } }), eventKey: (0, import_fields39.text)({ validation: { isRequired: true } }), requestHash: (0, import_fields39.text)(), quantity: (0, import_fields39.integer)({ validation: { isRequired: true } }), balanceAfter: (0, import_fields39.integer)({ validation: { isRequired: true, min: 0 } }), reason: (0, import_fields39.text)({ validation: { isRequired: true } }), recordedBy: (0, import_fields39.relationship)({ ref: "User" }), ...trackingFields }
 });
-var RetailClose = (0, import_core38.list)({
+var RetailClose = (0, import_core36.list)({
   access: access2,
   db: { extendPrismaSchema: compoundUniqueDb("organizationId, requestKey") },
-  fields: { organization: organization2(), location: location(), requestKey: (0, import_fields41.text)({ validation: { isRequired: true } }), requestHash: (0, import_fields41.text)({ validation: { isRequired: true } }), periodStart: (0, import_fields41.timestamp)({ validation: { isRequired: true } }), periodEnd: (0, import_fields41.timestamp)({ validation: { isRequired: true } }), openingAmount: (0, import_fields41.integer)({ validation: { min: 0 } }), expectedAmount: (0, import_fields41.integer)({ validation: { isRequired: true } }), countedAmount: (0, import_fields41.integer)({ validation: { isRequired: true, min: 0 } }), varianceAmount: (0, import_fields41.integer)({ validation: { isRequired: true } }), reason: (0, import_fields41.text)(), evidence: (0, import_fields41.json)({ defaultValue: {} }), recordedBy: (0, import_fields41.relationship)({ ref: "User" }), ...trackingFields }
+  fields: { organization: organization2(), location: location(), requestKey: (0, import_fields39.text)({ validation: { isRequired: true } }), requestHash: (0, import_fields39.text)({ validation: { isRequired: true } }), periodStart: (0, import_fields39.timestamp)({ validation: { isRequired: true } }), periodEnd: (0, import_fields39.timestamp)({ validation: { isRequired: true } }), openingAmount: (0, import_fields39.integer)({ validation: { min: 0 } }), expectedAmount: (0, import_fields39.integer)({ validation: { isRequired: true } }), countedAmount: (0, import_fields39.integer)({ validation: { isRequired: true, min: 0 } }), varianceAmount: (0, import_fields39.integer)({ validation: { isRequired: true } }), reason: (0, import_fields39.text)(), evidence: (0, import_fields39.json)({ defaultValue: {} }), recordedBy: (0, import_fields39.relationship)({ ref: "User" }), ...trackingFields }
 });
 
 // features/keystone/models/CounterPaymentAttempt.ts
-var import_core39 = require("@keystone-6/core");
-var import_access67 = require("@keystone-6/core/access");
-var import_fields42 = require("@keystone-6/core/fields");
+var import_core37 = require("@keystone-6/core");
+var import_access63 = require("@keystone-6/core/access");
+var import_fields40 = require("@keystone-6/core/fields");
 init_tenantRelationships();
 init_trackingFields();
-var CounterPaymentAttempt = (0, import_core39.list)({
-  access: { operation: { query: import_access67.denyAll, create: import_access67.denyAll, update: import_access67.denyAll, delete: import_access67.denyAll } },
+var CounterPaymentAttempt = (0, import_core37.list)({
+  access: { operation: { query: import_access63.denyAll, create: import_access63.denyAll, update: import_access63.denyAll, delete: import_access63.denyAll } },
   db: { extendPrismaSchema: compoundUniqueDb("organizationId, requestKey") },
   fields: {
-    organization: (0, import_fields42.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
-    location: (0, import_fields42.relationship)({ ref: "Location", db: { extendPrismaSchema: requiredRelationshipDb("location") } }),
-    purpose: (0, import_fields42.select)({
+    organization: (0, import_fields40.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
+    location: (0, import_fields40.relationship)({ ref: "Location", db: { extendPrismaSchema: requiredRelationshipDb("location") } }),
+    purpose: (0, import_fields40.select)({
       type: "string",
       options: [
         { label: "Retail sale", value: "retail_sale" },
@@ -9520,9 +9779,9 @@ var CounterPaymentAttempt = (0, import_core39.list)({
       ],
       validation: { isRequired: true }
     }),
-    requestKey: (0, import_fields42.text)({ validation: { isRequired: true } }),
-    requestHash: (0, import_fields42.text)({ validation: { isRequired: true } }),
-    status: (0, import_fields42.select)({
+    requestKey: (0, import_fields40.text)({ validation: { isRequired: true } }),
+    requestHash: (0, import_fields40.text)({ validation: { isRequired: true } }),
+    status: (0, import_fields40.select)({
       type: "string",
       options: [
         { label: "Reserved", value: "reserved" },
@@ -9538,46 +9797,46 @@ var CounterPaymentAttempt = (0, import_core39.list)({
       defaultValue: "reserved",
       validation: { isRequired: true }
     }),
-    amount: (0, import_fields42.integer)({ validation: { isRequired: true, min: 0 } }),
-    currencyCode: (0, import_fields42.text)({ defaultValue: "USD" }),
+    amount: (0, import_fields40.integer)({ validation: { isRequired: true, min: 0 } }),
+    currencyCode: (0, import_fields40.text)({ defaultValue: "USD" }),
     // Accepted lines/terms, captured when the attempt is reserved and never re-derived.
-    quote: (0, import_fields42.json)({ defaultValue: {} }),
-    providerId: (0, import_fields42.text)({ defaultValue: "" }),
-    providerKey: (0, import_fields42.text)({ defaultValue: "" }),
-    providerCheckoutId: (0, import_fields42.text)({ defaultValue: "" }),
-    providerPaymentId: (0, import_fields42.text)({ defaultValue: "" }),
-    providerRefundId: (0, import_fields42.text)({ defaultValue: "" }),
-    claimToken: (0, import_fields42.text)({ defaultValue: "" }),
-    result: (0, import_fields42.json)({ defaultValue: {} }),
-    lastError: (0, import_fields42.text)({ defaultValue: "" }),
-    expiresAt: (0, import_fields42.timestamp)(),
-    resolvedAt: (0, import_fields42.timestamp)(),
-    recordedBy: (0, import_fields42.relationship)({ ref: "User" }),
+    quote: (0, import_fields40.json)({ defaultValue: {} }),
+    providerId: (0, import_fields40.text)({ defaultValue: "" }),
+    providerKey: (0, import_fields40.text)({ defaultValue: "" }),
+    providerCheckoutId: (0, import_fields40.text)({ defaultValue: "" }),
+    providerPaymentId: (0, import_fields40.text)({ defaultValue: "" }),
+    providerRefundId: (0, import_fields40.text)({ defaultValue: "" }),
+    claimToken: (0, import_fields40.text)({ defaultValue: "" }),
+    result: (0, import_fields40.json)({ defaultValue: {} }),
+    lastError: (0, import_fields40.text)({ defaultValue: "" }),
+    expiresAt: (0, import_fields40.timestamp)(),
+    resolvedAt: (0, import_fields40.timestamp)(),
+    recordedBy: (0, import_fields40.relationship)({ ref: "User" }),
     ...trackingFields
   }
 });
 
 // features/keystone/models/StaffIntent.ts
-var import_core40 = require("@keystone-6/core");
-var import_access68 = require("@keystone-6/core/access");
-var import_fields43 = require("@keystone-6/core/fields");
+var import_core38 = require("@keystone-6/core");
+var import_access64 = require("@keystone-6/core/access");
+var import_fields41 = require("@keystone-6/core/fields");
 init_tenantRelationships();
 init_trackingFields();
-var StaffIntent = (0, import_core40.list)({
-  access: { operation: { query: import_access68.denyAll, create: import_access68.denyAll, update: import_access68.denyAll, delete: import_access68.denyAll } },
+var StaffIntent = (0, import_core38.list)({
+  access: { operation: { query: import_access64.denyAll, create: import_access64.denyAll, update: import_access64.denyAll, delete: import_access64.denyAll } },
   db: { extendPrismaSchema: compoundUniqueDb("organizationId, requestKey") },
   ui: { isHidden: true },
   fields: {
-    organization: (0, import_fields43.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
-    actor: (0, import_fields43.relationship)({ ref: "User" }),
-    workspace: (0, import_fields43.text)({ validation: { isRequired: true } }),
-    operation: (0, import_fields43.text)({ validation: { isRequired: true } }),
-    scope: (0, import_fields43.text)(),
-    requestKey: (0, import_fields43.text)({ validation: { isRequired: true } }),
-    requestHash: (0, import_fields43.text)({ validation: { isRequired: true } }),
+    organization: (0, import_fields41.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
+    actor: (0, import_fields41.relationship)({ ref: "User" }),
+    workspace: (0, import_fields41.text)({ validation: { isRequired: true } }),
+    operation: (0, import_fields41.text)({ validation: { isRequired: true } }),
+    scope: (0, import_fields41.text)(),
+    requestKey: (0, import_fields41.text)({ validation: { isRequired: true } }),
+    requestHash: (0, import_fields41.text)({ validation: { isRequired: true } }),
     // Submitted form values, exactly as sent; private to the actor and cleared on resolution.
-    form: (0, import_fields43.json)({ defaultValue: {} }),
-    status: (0, import_fields43.select)({
+    form: (0, import_fields41.json)({ defaultValue: {} }),
+    status: (0, import_fields41.select)({
       type: "string",
       options: [
         { label: "Not confirmed", value: "pending" },
@@ -9588,18 +9847,102 @@ var StaffIntent = (0, import_core40.list)({
       validation: { isRequired: true }
     }),
     // What the operation returned when it was confirmed (ids only), for an exact replay.
-    result: (0, import_fields43.json)({ defaultValue: {} }),
-    lastError: (0, import_fields43.text)(),
-    expiresAt: (0, import_fields43.timestamp)(),
-    resolvedAt: (0, import_fields43.timestamp)(),
+    result: (0, import_fields41.json)({ defaultValue: {} }),
+    lastError: (0, import_fields41.text)(),
+    expiresAt: (0, import_fields41.timestamp)(),
+    resolvedAt: (0, import_fields41.timestamp)(),
     ...trackingFields
   }
 });
 
 // features/keystone/models/index.ts
 init_Spot();
+
+// features/keystone/models/Credits.ts
+var import_core40 = require("@keystone-6/core");
+var import_access67 = require("@keystone-6/core/access");
+var import_fields43 = require("@keystone-6/core/fields");
+init_access();
+init_tenantPolicy();
+init_trackingFields();
+init_tenantRelationships();
+var kindOptions = [{ label: "Group class", value: "group" }, { label: "Private", value: "private" }, { label: "Duet or trio", value: "duet" }];
+var ownOrStaff = ({ session }) => tenantFilter({ session }, canManageTenant({ session }, "canManageAllRecords") || session?.data?.role?.canManageCheckIns ? void 0 : { member: { user: { id: { equals: session?.itemId } } } });
+var ClassPack = (0, import_core40.list)({
+  db: { extendPrismaSchema: compoundUniqueDb("organizationId, name") },
+  access: {
+    operation: { query: () => true, create: permissions.canManageAllRecords, update: permissions.canManageAllRecords, delete: import_access67.denyAll },
+    filter: { query: ({ session }) => session?.data?.role?.canManageAllRecords ? tenantFilter({ session }) : { isActive: { equals: true } }, update: tenantFilter }
+  },
+  ui: { listView: { initialColumns: ["name", "kind", "quantity", "price", "validDays", "introOnly", "isActive"] } },
+  fields: {
+    organization: (0, import_fields43.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
+    name: (0, import_fields43.text)({ validation: { isRequired: true } }),
+    description: (0, import_fields43.text)({ ui: { displayMode: "textarea" } }),
+    kind: (0, import_fields43.select)({ type: "string", options: kindOptions, defaultValue: "group", validation: { isRequired: true } }),
+    quantity: (0, import_fields43.integer)({ validation: { isRequired: true, min: 1, max: 500 } }),
+    price: (0, import_fields43.integer)({ validation: { isRequired: true, min: 0, max: 1e7 }, ui: { description: "Price in cents" } }),
+    validDays: (0, import_fields43.integer)({ validation: { isRequired: true, min: 1, max: 3650 } }),
+    introOnly: (0, import_fields43.checkbox)({ defaultValue: false, ui: { description: "Intro offer: one purchase per client, matched on account, email and phone" } }),
+    firstTimersOnly: (0, import_fields43.checkbox)({ defaultValue: false, ui: { description: "Also refuse anyone who has booked a class before" } }),
+    activatesOn: (0, import_fields43.select)({ type: "string", options: [{ label: "On purchase", value: "purchase" }, { label: "On first booking", value: "first_booking" }], defaultValue: "purchase", validation: { isRequired: true } }),
+    locations: (0, import_fields43.relationship)({ ref: "Location", many: true, ui: { description: "Empty means every location" } }),
+    sortOrder: (0, import_fields43.integer)({ defaultValue: 0 }),
+    isActive: (0, import_fields43.checkbox)({ defaultValue: true }),
+    ...trackingFields
+  }
+});
+var CreditGrant = (0, import_core40.list)({
+  db: { extendPrismaSchema: compoundUniqueDb("organizationId, sourceKey") },
+  access: { operation: { query: isSignedIn, create: import_access67.denyAll, update: import_access67.denyAll, delete: import_access67.denyAll }, filter: { query: ownOrStaff } },
+  ui: { listView: { initialColumns: ["member", "source", "kind", "quantity", "remaining", "expiresAt", "status"] } },
+  fields: {
+    organization: (0, import_fields43.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
+    member: (0, import_fields43.relationship)({ ref: "Member", db: { extendPrismaSchema: requiredRelationshipDb("member") } }),
+    source: (0, import_fields43.select)({ type: "string", options: ["membership_period", "pack", "intro", "comp", "import"].map((value) => ({ label: value, value })), validation: { isRequired: true } }),
+    /** Unique per organization: the payment, desk sale or import row that created this grant. */
+    sourceKey: (0, import_fields43.text)({ validation: { isRequired: true } }),
+    kind: (0, import_fields43.select)({ type: "string", options: kindOptions, defaultValue: "group", validation: { isRequired: true } }),
+    classPack: (0, import_fields43.relationship)({ ref: "ClassPack" }),
+    membership: (0, import_fields43.relationship)({ ref: "Membership" }),
+    payment: (0, import_fields43.relationship)({ ref: "Payment" }),
+    quantity: (0, import_fields43.integer)({ validation: { isRequired: true, min: -1 } }),
+    remaining: (0, import_fields43.integer)({ validation: { isRequired: true, min: -1 } }),
+    validFrom: (0, import_fields43.timestamp)({ validation: { isRequired: true } }),
+    /** Null until first booking for packs that activate on first booking. */
+    expiresAt: (0, import_fields43.timestamp)(),
+    validDays: (0, import_fields43.integer)({ validation: { min: 1 } }),
+    status: (0, import_fields43.select)({ type: "string", options: ["active", "refunded", "revoked"].map((value) => ({ label: value, value })), defaultValue: "active", validation: { isRequired: true } }),
+    priceSnapshot: (0, import_fields43.json)({ defaultValue: {} }),
+    note: (0, import_fields43.text)(),
+    ...trackingFields
+  }
+});
+var CreditEntry = (0, import_core40.list)({
+  db: { extendPrismaSchema: compoundUniqueDb("organizationId, eventKey") },
+  access: { operation: { query: isSignedIn, create: import_access67.denyAll, update: import_access67.denyAll, delete: import_access67.denyAll }, filter: { query: ownOrStaff } },
+  fields: {
+    organization: (0, import_fields43.relationship)({ ref: "Organization", db: { extendPrismaSchema: requiredRelationshipDb("organization") } }),
+    member: (0, import_fields43.relationship)({ ref: "Member", db: { extendPrismaSchema: requiredRelationshipDb("member") } }),
+    grant: (0, import_fields43.relationship)({ ref: "CreditGrant", db: { extendPrismaSchema: requiredRelationshipDb("grant") } }),
+    eventKey: (0, import_fields43.text)({ validation: { isRequired: true } }),
+    kind: (0, import_fields43.select)({ type: "string", options: ["grant", "debit", "restore", "expire", "refund", "adjust"].map((value) => ({ label: value, value })), validation: { isRequired: true } }),
+    delta: (0, import_fields43.integer)({ validation: { isRequired: true } }),
+    balanceAfter: (0, import_fields43.integer)({ validation: { isRequired: true, min: -1 } }),
+    booking: (0, import_fields43.relationship)({ ref: "ClassBooking" }),
+    appointment: (0, import_fields43.relationship)({ ref: "Appointment" }),
+    actor: (0, import_fields43.relationship)({ ref: "User" }),
+    reason: (0, import_fields43.text)(),
+    ...trackingFields
+  }
+});
+
+// features/keystone/models/index.ts
 var models = {
   Spot,
+  ClassPack,
+  CreditGrant,
+  CreditEntry,
   RetailItem,
   RetailSale,
   RetailReturn,
@@ -9612,8 +9955,6 @@ var models = {
   TrainingCreditEntry,
   ContactMessage,
   GiftCard,
-  MembershipCreditGrant,
-  MembershipCreditEntry,
   OperationalNotice,
   ParticipationPolicy,
   ParticipationEvidence,
@@ -9821,14 +10162,14 @@ function qrSecret() {
   }
   return secret;
 }
-function generateQRSignature(memberId, organizationId, timestamp31) {
-  const data = `${organizationId}:${memberId}:${timestamp31}`;
+function generateQRSignature(memberId, organizationId, timestamp30) {
+  const data = `${organizationId}:${memberId}:${timestamp30}`;
   return import_crypto.default.createHmac("sha256", qrSecret()).update(data).digest("hex");
 }
 function createQRCodeData(memberId, organizationId) {
-  const timestamp31 = Date.now();
-  const signature = generateQRSignature(memberId, organizationId, timestamp31);
-  return { memberId, organizationId, timestamp: timestamp31, signature };
+  const timestamp30 = Date.now();
+  const signature = generateQRSignature(memberId, organizationId, timestamp30);
+  return { memberId, organizationId, timestamp: timestamp30, signature };
 }
 function encodeQRData(data) {
   return Buffer.from(JSON.stringify(data)).toString("base64url");
@@ -10477,18 +10818,18 @@ async function getRosterSessions(_root, args, context) {
   const from = localDayBound(args.from, timeZone, false) || new Date(now.getTime() - 24 * 60 * 60 * 1e3);
   const to = localDayBound(args.to, timeZone, true);
   if (to && to <= from) throw new Error("The end date must be on or after the start date");
-  const text43 = (path) => path({ contains: q, mode: "insensitive" });
+  const text42 = (path) => path({ contains: q, mode: "insensitive" });
   const base = [
     { organization: { id: { equals: actor2.organizationId } } },
     { date: { gte: from.toISOString() } },
     ...to ? [{ date: { lt: to.toISOString() } }] : [],
     ...actor2.instructorOnly ? [assignmentFilter(actor2.userId)] : [],
     ...q ? [{ OR: [
-      text43((match) => ({ classSchedule: { name: match } })),
-      text43((match) => ({ instructor: { user: { name: match } } })),
-      text43((match) => ({ AND: [{ instructor: null }, { classSchedule: { instructor: { user: { name: match } } } }] })),
-      text43((match) => ({ location: { name: match } })),
-      text43((match) => ({ AND: [{ location: null }, { classSchedule: { location: { name: match } } }] }))
+      text42((match) => ({ classSchedule: { name: match } })),
+      text42((match) => ({ instructor: { user: { name: match } } })),
+      text42((match) => ({ AND: [{ instructor: null }, { classSchedule: { instructor: { user: { name: match } } } }] })),
+      text42((match) => ({ location: { name: match } })),
+      text42((match) => ({ AND: [{ location: null }, { classSchedule: { location: { name: match } } }] }))
     ] }] : []
   ];
   const nowIso = now.toISOString();
@@ -11350,6 +11691,9 @@ async function failMembershipBillingAttempt(context, claim2, error, providerOutc
   });
 }
 
+// features/keystone/mutations/stripeSubscription.ts
+init_commercial_agreement();
+
 // features/integrations/payment/lifecycle.ts
 var import_node_crypto7 = require("node:crypto");
 function createMembershipCheckoutIdempotencyKey(input) {
@@ -11674,7 +12018,8 @@ async function changeMembershipTier(root, { membershipId, newTierId, idempotency
       productId: newTier.stripeProductId,
       amount: tierAmountMinor(newTier, membership.billingCycle),
       currencyCode: contractCurrency,
-      billingCycle: membership.billingCycle === "annual" ? "annual" : "monthly"
+      billingCycle: membership.billingCycle === "annual" ? "annual" : "monthly",
+      billingPeriod: membership.billingCycle === "annual" ? null : newTier.billingPeriod ?? "month"
     });
     providerExecutionStarted = true;
     await adapter.changeSubscriptionPrice(
@@ -11747,10 +12092,11 @@ async function getStripeBillingPortal(root, { userId, returnUrl }, context) {
 }
 
 // features/keystone/mutations/paymentLifecycle.ts
-var import_node_crypto13 = __toESM(require("node:crypto"));
+var import_node_crypto14 = __toESM(require("node:crypto"));
 
 // features/integrations/payment/membership-checkout-core.ts
 init_stripe_environment_provider();
+init_commercial_agreement();
 init_prisma_result();
 init_classCapacity();
 init_current_actor();
@@ -11967,7 +12313,8 @@ async function initiateMembershipCheckoutForUser(input) {
       productId: tier.stripeProductId,
       amount,
       currencyCode,
-      billingCycle: input.billingCycle
+      billingCycle: input.billingCycle,
+      billingPeriod: input.billingCycle === "annual" ? null : tier.billingPeriod ?? "month"
     });
     await ensureMemberProfile(input.context, user);
   } catch (error) {
@@ -12062,6 +12409,7 @@ async function initiateMembershipCheckoutForUser(input) {
 // features/integrations/payment/provision-membership.ts
 init_classCapacity();
 init_membership_credits();
+init_commercial_agreement();
 init_prisma_result();
 init_operational_notices();
 async function provisionMembershipFromCheckoutSession(providerSessionId, expectedOrganizationId, context) {
@@ -13979,7 +14327,252 @@ var giftCardTypeDefs = `
   }
 `;
 
+// features/keystone/mutations/packs.ts
+var import_node_crypto13 = __toESM(require("node:crypto"));
+init_currentRoleActor();
+init_prisma_result();
+init_current_actor();
+init_internal_origin();
+init_credits();
+init_stripe_environment_provider();
+init_classCapacity();
+var PACK_SOURCE = "openfront-pilates-pack";
+var PROVIDER_CODE5 = "pp_stripe";
+var CHECKOUT_MINUTES3 = 30;
+var DAY4 = 864e5;
+var normalizeEmail = (value) => String(value ?? "").trim().toLowerCase();
+function normalizePhone(value) {
+  const digits = String(value ?? "").replace(/\D+/g, "");
+  return digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+}
+async function assertPackEligible(txIn, organizationId, member, pack) {
+  const tx = guardKeystonePrismaResults(txIn);
+  if (!pack?.isActive) throw new Error("This pack is not on sale");
+  if (!pack.introOnly && !pack.firstTimersOnly) return;
+  const email = normalizeEmail(member.email);
+  const phone = normalizePhone(member.phone);
+  const people = await tx.member.findMany({ where: { organizationId }, select: { id: true, email: true, phone: true, user: { select: { email: true, phone: true } } }, take: 2e4 });
+  const same = people.filter((p2) => p2.id === member.id || email && [normalizeEmail(p2.email), normalizeEmail(p2.user?.email)].includes(email) || phone && phone.length >= 7 && [normalizePhone(p2.phone), normalizePhone(p2.user?.phone)].includes(phone)).map((p2) => p2.id);
+  if (pack.introOnly) {
+    const prior = await tx.creditGrant.findFirst({ where: { organizationId, memberId: { in: same }, source: "intro", status: { not: "revoked" } }, select: { id: true } });
+    if (prior) throw new Error("The intro offer is for new clients and has already been used on this account, email or phone number.");
+  }
+  if (pack.firstTimersOnly) {
+    const booked = await tx.classBooking.findFirst({ where: { organizationId, memberId: { in: same }, status: { in: ["confirmed", "attended", "no_show", "late_cancelled"] } }, select: { id: true } });
+    if (booked) throw new Error("This offer is for first-time clients only.");
+  }
+}
+async function grantPack(tx, input) {
+  const now = /* @__PURE__ */ new Date();
+  const activatesLater = input.pack.activatesOn === "first_booking";
+  return issueGrant(tx, {
+    organizationId: input.organizationId,
+    memberId: input.memberId,
+    source: input.pack.introOnly ? "intro" : "pack",
+    sourceKey: input.sourceKey,
+    kind: input.pack.kind,
+    quantity: input.pack.quantity,
+    validFrom: now,
+    expiresAt: activatesLater ? null : new Date(now.getTime() + input.pack.validDays * DAY4),
+    validDays: input.pack.validDays,
+    classPackId: input.pack.id,
+    paymentId: input.paymentId ?? null,
+    actorId: input.actorId ?? null,
+    priceSnapshot: { packId: input.pack.id, name: input.pack.name, price: input.pack.price, quantity: input.pack.quantity, validDays: input.pack.validDays },
+    note: input.note ?? input.pack.name
+  });
+}
+function requireSession2(context) {
+  const session = context.session;
+  if (!session?.itemId) throw new Error("Sign in to buy a pack");
+  const organizationId = session.data?.organization?.id;
+  if (!organizationId) throw new Error("Account is not assigned to a studio");
+  return { userId: String(session.itemId), organizationId: String(organizationId) };
+}
+async function packAdapter(context, organizationId, purpose) {
+  const { provider, adapter } = await getAdapterForProvider(context, PROVIDER_CODE5, organizationId, purpose);
+  if (purpose === "charge" && provider.adapterKey === "stripe") {
+    const merchants = await context.sudo().query.PaymentProvider.findMany({
+      where: { AND: [{ code: { equals: PROVIDER_CODE5 } }, { adapterKey: { equals: "stripe" } }, installedPaymentProviderWhere()] },
+      take: 2,
+      query: "id providerAccountId organization { id }"
+    });
+    assertSingleMerchantCheckout(merchants, organizationId);
+  }
+  if (!adapter.createCounterCheckout || !adapter.retrieveCounterCheckout) throw new Error("Card checkout is not available for this payment provider");
+  return { provider, adapter };
+}
+async function ensureClientProfile(tx, organizationId, user) {
+  const existing = await tx.member.findFirst({ where: { organizationId, userId: user.id }, select: { id: true, status: true, email: true, phone: true } });
+  if (existing) {
+    if (existing.status !== "active") throw new Error("Your studio profile isn't active. Contact the front desk.");
+    return existing;
+  }
+  return tx.member.create({ data: { organizationId, userId: user.id, name: user.name || user.email, email: user.email, phone: user.phone || "", status: "active", joinDate: /* @__PURE__ */ new Date() }, select: { id: true, status: true, email: true, phone: true } });
+}
+async function startPackCheckout(_root, { classPackId }, context) {
+  const { userId, organizationId } = requireSession2(context);
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const [user, pack, settings] = await Promise.all([
+    prisma.user.findFirst({ where: { id: userId, organizationId }, select: { id: true, name: true, email: true, phone: true } }),
+    prisma.classPack.findFirst({ where: { id: String(classPackId || ""), organizationId } }),
+    prisma.studioSettings.findFirst({ where: { organizationId }, orderBy: [{ createdAt: "asc" }], select: { currencyCode: true } })
+  ]);
+  if (!user) throw new Error("Account not found");
+  if (!pack || !pack.isActive) throw new Error("This pack is not on sale");
+  if (pack.price < 50) throw new Error("This pack is sold at the front desk");
+  const currencyCode = String(settings?.currencyCode || "USD").toUpperCase();
+  const member = await prisma.member.findFirst({ where: { organizationId, userId }, select: { id: true, email: true, phone: true } });
+  await assertPackEligible(prisma, organizationId, member ?? { id: "__new__", email: user.email, phone: user.phone, userId }, pack);
+  const open = await prisma.paymentSession.findFirst({ where: { organizationId, userId, billingCycle: "pack", status: "requires_action", expiresAt: { gt: /* @__PURE__ */ new Date() } }, orderBy: [{ createdAt: "desc" }] });
+  if (open?.data?.classPackId === pack.id && open.checkoutUrl) return { id: open.id, checkoutUrl: open.checkoutUrl, amount: open.amount };
+  const { provider, adapter } = await packAdapter(context, organizationId, "charge");
+  const key = `pack:${organizationId}:${userId}:${pack.id}:${import_node_crypto13.default.randomUUID()}`;
+  const local = await withKeystonePrismaTransaction(context.prisma, async (tx) => {
+    await lockActiveOrganization(tx, organizationId);
+    return tx.paymentSession.create({ data: {
+      organizationId,
+      userId,
+      paymentProviderId: provider.id,
+      status: "processing",
+      billingCycle: "pack",
+      amount: pack.price,
+      currencyCode,
+      idempotencyKey: key,
+      data: { kind: "pack", classPackId: pack.id, packName: pack.name }
+    } });
+  });
+  try {
+    const checkout = await adapter.createCounterCheckout({
+      amount: pack.price,
+      currencyCode,
+      description: pack.name.slice(0, 200),
+      metadata: { source: PACK_SOURCE, organizationId, paymentSessionId: local.id, classPackId: pack.id, userId },
+      successUrl: `${publicAppUrl("/order/confirmed?kind=pack")}&session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: publicAppUrl("/pricing"),
+      expiresAt: new Date(Date.now() + CHECKOUT_MINUTES3 * 6e4 + 6e4),
+      idempotencyKey: key,
+      customerEmail: user.email || void 0
+    });
+    const saved = await prisma.paymentSession.updateMany({ where: { id: local.id, status: "processing" }, data: { status: "requires_action", providerSessionId: checkout.providerSessionId, checkoutUrl: checkout.checkoutUrl, expiresAt: checkout.expiresAt ? new Date(checkout.expiresAt) : null } });
+    requirePrismaAffectedCount(saved, 1, "Pack checkout finalization");
+    return { id: local.id, checkoutUrl: checkout.checkoutUrl, amount: pack.price };
+  } catch (error) {
+    await prisma.paymentSession.updateMany({ where: { id: local.id, status: "processing" }, data: { status: "failed", failedAt: /* @__PURE__ */ new Date(), lastError: error instanceof Error ? error.message.slice(0, 1e3) : "Checkout failed" } });
+    throw error;
+  }
+}
+async function fulfillPackCheckout(context, organizationId, providerSessionId, verified) {
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const local = await prisma.paymentSession.findFirst({ where: { organizationId, providerSessionId, billingCycle: "pack" } });
+  if (!local) throw new Error("Pack checkout not found");
+  let session = verified?.session;
+  let providerId2 = verified?.providerId;
+  if (!session) {
+    const { adapter, provider } = await packAdapter(context, organizationId, "reconcile");
+    session = await adapter.retrieveCounterCheckout(providerSessionId);
+    providerId2 = provider.id;
+  }
+  const metadata = session?.metadata || {};
+  if (session?.id !== providerSessionId || metadata.source !== PACK_SOURCE || metadata.paymentSessionId !== local.id || metadata.organizationId !== organizationId) throw new Error("Checkout does not belong to this pack");
+  if (session.amount_total !== local.amount || String(session.currency).toUpperCase() !== String(local.currencyCode).toUpperCase()) throw new Error("Pack amount does not match the checkout");
+  if (session.status === "expired") {
+    await prisma.paymentSession.updateMany({ where: { id: local.id, status: { in: ["requires_action", "processing"] } }, data: { status: "expired" } });
+    return { state: "expired", grantId: null };
+  }
+  if (session.status !== "complete" || session.payment_status !== "paid") return { state: "pending", grantId: null };
+  const paymentIntentId = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id || "";
+  if (!paymentIntentId) throw new Error("Paid checkout has no payment reference");
+  return withKeystonePrismaTransaction(context.prisma, async (tx) => {
+    await lockTransactionKey(tx, `pack-checkout:${local.id}`);
+    const current = await tx.paymentSession.findFirst({ where: { id: local.id } });
+    if (current.status === "completed" && current.data?.grantId) return { state: "granted", grantId: current.data.grantId };
+    const user = await tx.user.findFirst({ where: { id: local.userId, organizationId }, select: { id: true, name: true, email: true, phone: true } });
+    if (!user) throw new Error("Pack account is missing");
+    const member = await ensureClientProfile(tx, organizationId, user);
+    await lockTransactionKey(tx, `member:${member.id}`);
+    const pack = await tx.classPack.findFirst({ where: { id: local.data?.classPackId, organizationId } });
+    if (!pack) throw new Error("Pack is missing");
+    let payment = await tx.payment.findFirst({ where: { organizationId, stripePaymentIntentId: paymentIntentId } });
+    if (!payment) payment = await tx.payment.create({ data: {
+      organizationId,
+      memberId: member.id,
+      paymentProviderId: providerId2,
+      paymentSessionId: local.id,
+      amount: local.amount,
+      currencyCode: local.currencyCode,
+      status: "succeeded",
+      paymentDate: /* @__PURE__ */ new Date(),
+      stripePaymentIntentId: paymentIntentId,
+      receiptNumber: `PACK-${providerSessionId.slice(-12)}`,
+      description: pack.name,
+      metadata: { kind: pack.introOnly ? "intro" : "pack", purpose: "pack", classPackId: pack.id, providerSessionId }
+    } });
+    const { grant } = await grantPack(tx, { organizationId, memberId: member.id, pack, sourceKey: `payment:${payment.id}`, paymentId: payment.id });
+    await tx.paymentSession.update({ where: { id: local.id }, data: { status: "completed", completedAt: /* @__PURE__ */ new Date(), data: { ...local.data || {}, grantId: grant.id, paymentIntentId } } });
+    return { state: "granted", grantId: grant.id };
+  });
+}
+async function completePackCheckout(_root, { providerSessionId }, context) {
+  const { userId, organizationId } = requireSession2(context);
+  const id = String(providerSessionId || "").trim();
+  if (!/^cs_[A-Za-z0-9_]{1,250}$/.test(id)) throw new Error("Checkout reference is invalid");
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  const owned = await prisma.paymentSession.findFirst({ where: { organizationId, userId, providerSessionId: id, billingCycle: "pack" }, select: { id: true } });
+  if (!owned) throw new Error("Checkout was not found for this account");
+  return fulfillPackCheckout(context, organizationId, id);
+}
+async function myCredits(_root, args, context) {
+  const actor2 = await currentRoleActor(context);
+  const prisma = guardKeystonePrismaResults(context.prisma);
+  let memberId = args.memberId || null;
+  if (memberId && !actor2.canManageAllRecords && !actor2.canManageCheckIns) throw new Error("You can only read your own credits");
+  if (!memberId) memberId = (await prisma.member.findFirst({ where: { organizationId: actor2.organizationId, userId: actor2.userId }, select: { id: true } }))?.id ?? null;
+  if (!memberId) return { balances: {}, grants: [], ledger: [] };
+  const summary = await creditSummary(prisma, actor2.organizationId, memberId);
+  const ledger = await prisma.creditEntry.findMany({ where: { organizationId: actor2.organizationId, memberId }, orderBy: [{ createdAt: "desc" }], take: 100, select: { id: true, kind: true, delta: true, balanceAfter: true, createdAt: true, reason: true, grantId: true, bookingId: true } });
+  return { ...summary, ledger };
+}
+async function adjustCredits(_root, args, context) {
+  const actor2 = await currentRoleActor(context);
+  if (!actor2.canManageAllRecords) throw new Error("Credit adjustment permission required");
+  const reason = String(args.reason || "").trim();
+  if (reason.length < 3 || reason.length > 500) throw new Error("A reason between 3 and 500 characters is required");
+  const key = String(args.idempotencyKey || "").trim();
+  if (key.length < 8 || key.length > 200) throw new Error("A request key is required");
+  return withKeystonePrismaTransaction(context.prisma, async (tx) => {
+    const member = await tx.member.findFirst({ where: { id: args.memberId, organizationId: actor2.organizationId }, select: { id: true } });
+    if (!member) throw new Error("Client not found");
+    await lockTransactionKey(tx, `member:${member.id}`);
+    if (args.grantId) {
+      const replay2 = await tx.creditEntry.findFirst({ where: { organizationId: actor2.organizationId, eventKey: `adjust:${key}` } });
+      if (replay2) return { grantId: replay2.grantId, balance: replay2.balanceAfter, replayed: true };
+      const grant2 = await adjustGrant(tx, { organizationId: actor2.organizationId, grantId: args.grantId, delta: args.delta, reason, actorId: actor2.userId, eventKey: `adjust:${key}` });
+      return { grantId: grant2.id, balance: grant2.remaining, replayed: false };
+    }
+    if (!Number.isInteger(args.delta) || args.delta < 1 || args.delta > 500) throw new Error("A comp grant needs 1 to 500 credits");
+    const kind = ["group", "private", "duet"].includes(String(args.kind)) ? String(args.kind) : "group";
+    const days = Number.isInteger(args.validDays) && args.validDays > 0 ? args.validDays : 60;
+    const now = /* @__PURE__ */ new Date();
+    const { grant, created } = await issueGrant(tx, { organizationId: actor2.organizationId, memberId: member.id, source: "comp", sourceKey: `comp:${key}`, kind, quantity: args.delta, validFrom: now, expiresAt: new Date(now.getTime() + days * DAY4), validDays: days, note: reason, actorId: actor2.userId });
+    return { grantId: grant.id, balance: grant.remaining, replayed: !created };
+  });
+}
+var packTypeDefs = `
+  type PackCheckoutResult { id: ID!, checkoutUrl: String!, amount: Int! }
+  type PackCompletionResult { state: String!, grantId: ID }
+  extend type Query {
+    myCredits(memberId: ID): JSON!
+  }
+  extend type Mutation {
+    startPackCheckout(classPackId: ID!): PackCheckoutResult!
+    completePackCheckout(providerSessionId: String!): PackCompletionResult!
+    adjustCredits(memberId: ID!, grantId: ID, delta: Int!, reason: String!, kind: String, validDays: Int, idempotencyKey: String!): JSON!
+  }
+`;
+
 // features/keystone/mutations/paymentWebhook.ts
+init_commercial_agreement();
 function mapStripeStatusToSubscription(status, collectionPaused = false) {
   if (collectionPaused) return "paused";
   if (status === "active" || status === "trialing") return "active";
@@ -14056,18 +14649,18 @@ async function tierForProviderPrice(transaction, subscription, organizationId) {
 async function findUserForSubscription(transaction, subscription, organizationId) {
   const customerId = typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id;
   if (!customerId) return null;
-  const select31 = { id: true, organizationId: true, stripeCustomerId: true };
+  const select32 = { id: true, organizationId: true, stripeCustomerId: true };
   if (subscription.metadata?.userId) {
     const user2 = await transaction.user.findFirst({
       where: { id: subscription.metadata.userId, organizationId },
-      select: select31
+      select: select32
     });
     if (user2?.stripeCustomerId && user2.stripeCustomerId !== customerId) throw new Error("Subscription customer does not match the existing user");
     if (user2) return { user: user2, customerId };
   }
   const user = await transaction.user.findFirst({
     where: { stripeCustomerId: customerId, organizationId },
-    select: select31
+    select: select32
   });
   return user ? { user, customerId } : null;
 }
@@ -14120,7 +14713,7 @@ async function syncSubscription(context, adapter, incomingSubscription, organiza
     const priceTier = await tierForProviderPrice(transaction, subscription, organizationId);
     let tierId = membership?.tierId || checkout?.membershipTierId || null;
     const accepted = await membershipAcceptedPrice(transaction, membership, checkout);
-    const itemProblem = subscriptionItemsProblem(subscription, accepted, membership?.billingCycle || checkout?.billingCycle || "monthly");
+    const itemProblem = subscriptionItemsProblem(subscription, accepted, membership?.billingCycle || checkout?.billingCycle || "monthly", membership?.agreementSnapshot?.billingPeriod);
     if (!membership && checkout && itemProblem) {
       throw new Error(`Subscription doesn't match its checkout agreement (it ${itemProblem}); operator reconciliation required`);
     }
@@ -14315,7 +14908,7 @@ async function recordInvoicePayment(context, providerId2, organizationId, invoic
     const isOlderEvent = membership.billingEventAt && eventAt < new Date(membership.billingEventAt);
     if (isOlderPeriod || isOlderEvent || settled && status === "failed") return { applied: false, stale: true };
     const grantsPeriod = status === "succeeded" && ["subscription_create", "subscription_cycle"].includes(invoice.billing_reason || "");
-    const serviceProblem = grantsPeriod ? invoiceServiceProblem(invoice, await membershipAcceptedPrice(tx, membership, session), membership.billingCycle) : null;
+    const serviceProblem = grantsPeriod ? invoiceServiceProblem(invoice, await membershipAcceptedPrice(tx, membership, session), membership.billingCycle, membership.agreementSnapshot?.billingPeriod) : null;
     if (serviceProblem) {
       const pendingTierChange = await tx.membershipBillingAttempt.findFirst({
         where: { organizationId, membershipId: membership.id, operation: "tier-change", status: "processing" },
@@ -14579,6 +15172,8 @@ async function processVerifiedPaymentEvent(context, provider, adapter, organizat
           await reconcileCounterCheckoutEvent(context, organizationId, session);
         } else if (session.metadata?.source === DROP_IN_SOURCE) {
           await fulfillDropInCheckout(context, organizationId, session.id);
+        } else if (session.metadata?.source === PACK_SOURCE) {
+          await fulfillPackCheckout(context, organizationId, session.id);
         } else if (session.metadata?.source === GIFT_CARD_SOURCE) {
           await fulfillGiftCardCheckout(context, organizationId, session.id);
         } else if (session.mode === "subscription" && event.type === "checkout.session.completed") {
@@ -14592,6 +15187,7 @@ async function processVerifiedPaymentEvent(context, provider, adapter, organizat
         if (session.metadata?.source === COUNTER_SOURCE) await reconcileCounterCheckoutEvent(context, organizationId, session);
         else if (session.metadata?.source === DROP_IN_SOURCE) await fulfillDropInCheckout(context, organizationId, session.id);
         else if (session.metadata?.source === GIFT_CARD_SOURCE) await fulfillGiftCardCheckout(context, organizationId, session.id);
+        else if (session.metadata?.source === PACK_SOURCE) await fulfillPackCheckout(context, organizationId, session.id);
         else await expireCheckoutSession(context, session, organizationId);
         break;
       }
@@ -14682,18 +15278,18 @@ async function processVerifiedPaymentEvent(context, provider, adapter, organizat
 
 // features/keystone/mutations/paymentLifecycle.ts
 init_prisma_result();
-var PROVIDER_CODE5 = "pp_stripe";
+var PROVIDER_CODE6 = "pp_stripe";
 async function acquireRefundAdvisoryLock(transaction, paymentId) {
   const lockResult = await transaction.$queryRaw`SELECT true AS locked FROM (SELECT pg_advisory_xact_lock(hashtextextended(${`refund:${paymentId}`}, 0))) AS acquired`;
   if (lockResult instanceof Error) throw lockResult;
 }
-function requireSession2(context) {
+function requireSession3(context) {
   const session = context.session;
   if (!session?.itemId) throw new Error("Authentication required");
   return session;
 }
 async function initiateMembershipCheckout(root, { tierId, billingCycle }, context) {
-  const session = requireSession2(context);
+  const session = requireSession3(context);
   const cycle = billingCycle === "annual" ? "annual" : billingCycle === "monthly" ? "monthly" : null;
   if (!cycle) throw new Error("Billing cycle must be monthly or annual");
   const baseUrl = process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_BACKEND_URL;
@@ -14707,7 +15303,7 @@ async function initiateMembershipCheckout(root, { tierId, billingCycle }, contex
   });
 }
 async function completeMembershipCheckout(_root, { providerSessionId }, context) {
-  const session = requireSession2(context);
+  const session = requireSession3(context);
   const organizationId = session.data?.organization?.id;
   const normalizedSessionId = providerSessionId.trim();
   if (!organizationId || !normalizedSessionId || normalizedSessionId.length > 500) {
@@ -14730,7 +15326,7 @@ async function completeMembershipCheckout(_root, { providerSessionId }, context)
   return provisioned;
 }
 async function refundPayment(root, { paymentId, amount, reason, idempotencyKey }, context) {
-  const session = requireSession2(context);
+  const session = requireSession3(context);
   if (!session.data?.role?.canManageAllRecords) throw new Error("Payment management permission required");
   const organizationId = session.data?.organization?.id;
   if (!organizationId) throw new Error("Organization context required");
@@ -14739,11 +15335,11 @@ async function refundPayment(root, { paymentId, amount, reason, idempotencyKey }
   if (normalizedReason.length > 500) throw new Error("Refund reason must be 500 characters or fewer");
   if (requestId.length < 12 || requestId.length > 200) throw new Error("A unique refund idempotency key is required");
   const requestKey = `studio-refund:${paymentId}:${requestId}`;
-  const { provider, adapter } = await getAdapterForProvider(context, PROVIDER_CODE5, organizationId, "reconcile");
+  const { provider, adapter } = await getAdapterForProvider(context, PROVIDER_CODE6, organizationId, "reconcile");
   const deadline = Date.now() + 3e4;
   let claim2;
   while (Date.now() < deadline) {
-    const refundToken = import_node_crypto13.default.randomUUID();
+    const refundToken = import_node_crypto14.default.randomUUID();
     claim2 = await withKeystonePrismaTransaction(context.prisma, async (transaction) => {
       await acquireRefundAdvisoryLock(transaction, paymentId);
       const payment = await transaction.payment.findFirst({
@@ -15010,7 +15606,7 @@ async function checkOutMember(root, { checkInId }, context) {
 }
 
 // features/keystone/mutations/deterministicOnboarding.ts
-var import_node_crypto14 = __toESM(require("node:crypto"));
+var import_node_crypto15 = __toESM(require("node:crypto"));
 
 // features/keystone/onboarding/seed.json
 var seed_default = {
@@ -15771,12 +16367,13 @@ async function saveControlledOccurrence(tx, organizationId, input, id) {
       const lockedMember = await tx.member.findFirst({ where: { id: booking.memberId, organizationId }, include: { user: { include: { membership: true } } } });
       if (lockedMember?.status !== "active") throw new Error("A booked member is not eligible; resolve the booking before rescheduling");
       const dropIn = booking.serviceSnapshot?.credit?.basis === "drop_in_paid";
-      if (!dropIn) assertMembershipServiceEligibility(lockedMember?.user?.membership, date);
+      const packFunded = booking.serviceSnapshot?.credit?.basis === "credit" && booking.serviceSnapshot?.credit?.source !== "membership_period";
+      if (!dropIn && !packFunded) assertMembershipServiceEligibility(lockedMember?.user?.membership, date);
       if (dropIn && booking.status === "confirmed" && existing.date.getTime() !== date.getTime()) {
         await assertNoMemberServiceConflict(tx, booking.memberId, organizationId, { ...data, id: existing.id, classSchedule: schedule });
       } else if (booking.status === "confirmed" && existing.date.getTime() !== date.getTime()) {
-        const debit = await tx.membershipCreditEntry.findUnique({ where: { key: `${booking.id}:debit` }, include: { grant: true } });
-        if (!debit?.grant || date < debit.grant.periodStart || date >= debit.grant.periodEnd) throw new Error("Reschedule crosses a booking credit month or legacy credit provenance is missing; cancel and rebook with restored credits");
+        const debit = await tx.creditEntry.findFirst({ where: { organizationId, eventKey: `${booking.id}:debit` }, include: { grant: true } });
+        if (!debit?.grant || date < debit.grant.validFrom || debit.grant.expiresAt && date >= debit.grant.expiresAt) throw new Error("Reschedule crosses a booking credit month or legacy credit provenance is missing; cancel and rebook with restored credits");
         await assertNoMemberServiceConflict(tx, booking.memberId, organizationId, { ...data, id: existing.id, classSchedule: schedule });
       }
     }
@@ -15889,7 +16486,7 @@ var BOUNDED_INSTRUCTOR_ROLE = {
 };
 function placeholderCoachEmail(seedEmail, organizationId) {
   const local = seedEmail.split("@")[0].toLowerCase().replace(/[^a-z0-9._-]/g, "");
-  const tenant = import_node_crypto14.default.createHash("sha256").update(organizationId).digest("hex").slice(0, 12);
+  const tenant = import_node_crypto15.default.createHash("sha256").update(organizationId).digest("hex").slice(0, 12);
   return `${local}+${tenant}@example.invalid`;
 }
 var PRICE_ID = /^price_[A-Za-z0-9]+$/;
@@ -15970,7 +16567,7 @@ async function runDeterministicOnboarding(_root, args, context) {
     throw new Error("Onboarding management permission required");
   }
   if (actorUser.onboardingStatus === "dismissed") throw new Error("Dismissed onboarding must be restarted from the dashboard");
-  const configHash = import_node_crypto14.default.createHash("sha256").update(JSON.stringify({ template, seed: onboardingSeed })).digest("hex");
+  const configHash = import_node_crypto15.default.createHash("sha256").update(JSON.stringify({ template, seed: onboardingSeed })).digest("hex");
   return context.transaction(async (txContext) => {
     const tx = guardKeystonePrismaResults(txContext.prisma);
     const sudo = txContext.sudo();
@@ -16056,7 +16653,7 @@ async function runDeterministicOnboarding(_root, args, context) {
       if (existingUser) {
         instructorUserId = adopted("user", existingUser.id);
       } else {
-        const user = await sudo.db.User.createOne({ data: { name: fullName, email: tenantEmail, password: import_node_crypto14.default.randomBytes(32).toString("base64url"), organization: { connect: { id: organizationId } } } });
+        const user = await sudo.db.User.createOne({ data: { name: fullName, email: tenantEmail, password: import_node_crypto15.default.randomBytes(32).toString("base64url"), organization: { connect: { id: organizationId } } } });
         instructorUserId = created("user", String(user.id));
         await tx.user.update({ where: { id: instructorUserId }, data: { roleId: instructorRoleId } });
         manifest.placeholderUsers[instructorUserId] = { handle: instructor.handle, seedEmail: tenantEmail };
@@ -16266,7 +16863,7 @@ async function registerMember(_root, args, context) {
 }
 
 // features/keystone/mutations/memberInvitation.ts
-var import_node_crypto15 = __toESM(require("node:crypto"));
+var import_node_crypto16 = __toESM(require("node:crypto"));
 init_prisma_result();
 var emailPattern3 = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 async function inviteMember(_root, { data }, context) {
@@ -16323,7 +16920,7 @@ async function inviteMember(_root, { data }, context) {
         name,
         email,
         phone,
-        password: import_node_crypto15.default.randomBytes(32).toString("base64url")
+        password: import_node_crypto16.default.randomBytes(32).toString("base64url")
       },
       query: "id email"
     });
@@ -16581,10 +17178,10 @@ async function saveStudioClassSchedule(_root, { id, data }, context) {
     if (id && !existing) throw new Error("Schedule not found");
     const next = { organizationId };
     for (const key of ["name", "description", "dayOfWeek", "startTime", "endTime", "maxCapacity", "isActive"]) if (data[key] !== void 0) next[key] = data[key];
-    for (const [field, list43] of [["instructor", "instructor"], ["classType", "classType"], ["location", "location"], ["resource", "room"]]) {
+    for (const [field, list42] of [["instructor", "instructor"], ["classType", "classType"], ["location", "location"], ["resource", "room"]]) {
       if (data[field] === void 0) continue;
       const relatedId = data[field]?.disconnect ? null : data[field]?.connect?.id;
-      if (relatedId !== null && (typeof relatedId !== "string" || !await tx[list43].findFirst({ where: { id: relatedId, organizationId } }))) throw new Error(`${field} is not in this organization`);
+      if (relatedId !== null && (typeof relatedId !== "string" || !await tx[list42].findFirst({ where: { id: relatedId, organizationId } }))) throw new Error(`${field} is not in this organization`);
       next[`${field}Id`] = relatedId;
     }
     const merged = { ...existing, ...next };
@@ -16723,7 +17320,7 @@ async function updateRoom(_root, { id, data }, context) {
 }
 
 // features/kiosk/auth.ts
-var import_node_crypto16 = require("node:crypto");
+var import_node_crypto17 = require("node:crypto");
 var KIOSK_SESSION_MAX_AGE_SECONDS = 12 * 60 * 60;
 function kioskApiToken() {
   const token = process.env.KIOSK_API_TOKEN?.trim();
@@ -16736,7 +17333,7 @@ function getKioskOrganizationId() {
 function safeEqual2(left, right) {
   const leftBytes = Buffer.from(left);
   const rightBytes = Buffer.from(right);
-  return leftBytes.length === rightBytes.length && (0, import_node_crypto16.timingSafeEqual)(leftBytes, rightBytes);
+  return leftBytes.length === rightBytes.length && (0, import_node_crypto17.timingSafeEqual)(leftBytes, rightBytes);
 }
 function isKioskTokenValid(suppliedToken) {
   const requiredToken = kioskApiToken();
@@ -16900,7 +17497,7 @@ async function kioskRecordGuestCheckIn(_root, args, context) {
 }
 
 // features/keystone/mutations/discovery.ts
-var import_node_crypto17 = require("node:crypto");
+var import_node_crypto18 = require("node:crypto");
 var import_graphql3 = require("graphql");
 init_clientSource();
 init_classCapacity();
@@ -17158,7 +17755,7 @@ async function authorizeDiscovery(context, credential, partner, requiredScope) {
     if (failureBudget) await releaseAuthAttempt(context.prisma, failureBudget);
   };
   if (credential.startsWith("studio_")) {
-    const digest = (0, import_node_crypto17.createHash)("sha256").update(credential).digest("hex");
+    const digest = (0, import_node_crypto18.createHash)("sha256").update(credential).digest("hex");
     const prisma = guardKeystonePrismaResults(context.prisma);
     const stored = await prisma.integrationCredential.findUnique({ where: { digest }, include: { organization: true } });
     if (!stored || stored.revokedAt || !stored.expiresAt || stored.expiresAt <= /* @__PURE__ */ new Date() || stored.organization?.status !== "active") return rejectCredential("Unauthorized discovery request");
@@ -17184,7 +17781,7 @@ async function authorizeDiscovery(context, credential, partner, requiredScope) {
   if (allowlist.size && !allowlist.has(normalizedPartner)) throw new Error("Discovery partner is not authorized");
   const supplied = Buffer.from(credential || "");
   const configured = Buffer.from(configuredKey);
-  if (supplied.length !== configured.length || !(0, import_node_crypto17.timingSafeEqual)(supplied, configured)) {
+  if (supplied.length !== configured.length || !(0, import_node_crypto18.timingSafeEqual)(supplied, configured)) {
     return rejectCredential("Unauthorized discovery request");
   }
   await accepted();
@@ -17314,7 +17911,7 @@ async function submitContactForm(_root, { data }, context) {
 }
 
 // features/keystone/mutations/operations.ts
-var import_node_crypto18 = require("node:crypto");
+var import_node_crypto19 = require("node:crypto");
 init_operational_notices();
 init_operational_policy();
 init_prisma_result();
@@ -17397,8 +17994,8 @@ async function operationsWorkspace(_root, args, context) {
       resources: { skip: skips.resources, hasMore: resources.length > QUEUE_PAGE },
       credentials: { skip: skips.credentials, hasMore: credentials.length > QUEUE_PAGE }
     },
-    caseRequestKey: (0, import_node_crypto18.randomBytes)(24).toString("hex"),
-    evidenceRequestKey: (0, import_node_crypto18.randomBytes)(24).toString("hex"),
+    caseRequestKey: (0, import_node_crypto19.randomBytes)(24).toString("hex"),
+    evidenceRequestKey: (0, import_node_crypto19.randomBytes)(24).toString("hex"),
     limits: { queue: QUEUE_PAGE, memberSelector: 200 },
     waiverConfigured: policies.length > 0
   };
@@ -17467,7 +18064,7 @@ async function participationWorkspace(_root, { evidenceAfterId }, context) {
     acceptedCurrent: acceptances > 0,
     healthConsentCurrent: consents > 0,
     requests,
-    requestKey: (0, import_node_crypto18.randomBytes)(24).toString("hex")
+    requestKey: (0, import_node_crypto19.randomBytes)(24).toString("hex")
   };
 }
 async function runOperationsCommand(_root, { command, data }, context) {
@@ -17651,7 +18248,7 @@ async function runOperationsCommand(_root, { command, data }, context) {
       if (await tx.integrationCredential.count({ where: { organizationId, revokedAt: null, expiresAt: { gt: /* @__PURE__ */ new Date() } } }) >= 100) throw new Error("Revoke an active credential before creating another; the tenant limit is 100");
       const scopes = Array.isArray(data.scopes) ? [...new Set(data.scopes)] : [];
       if (!scopes.length || scopes.some((s) => !["classes:read", "bookings:create"].includes(String(s)))) throw new Error("Choose supported integration scopes");
-      const token = `studio_${(0, import_node_crypto18.randomBytes)(32).toString("base64url")}`;
+      const token = `studio_${(0, import_node_crypto19.randomBytes)(32).toString("base64url")}`;
       const expiresAt = dateValue(data.expiresAt, true);
       if (expiresAt <= /* @__PURE__ */ new Date() || expiresAt.getTime() > Date.now() + 366 * 864e5) throw new Error("Credential expiry must be within one year");
       const row = await tx.integrationCredential.create({ data: {
@@ -17659,7 +18256,7 @@ async function runOperationsCommand(_root, { command, data }, context) {
         label: boundedText(data.label, "Label", 120),
         partner: boundedText(data.partner, "Partner", 120),
         scopes,
-        digest: (0, import_node_crypto18.createHash)("sha256").update(token).digest("hex"),
+        digest: (0, import_node_crypto19.createHash)("sha256").update(token).digest("hex"),
         expiresAt,
         createdBy: userId
       } });
@@ -18134,7 +18731,7 @@ async function saveInstructorAvailability(_r, { data }, ctx) {
 }
 
 // features/keystone/mutations/portableData.ts
-var import_node_crypto19 = require("node:crypto");
+var import_node_crypto20 = require("node:crypto");
 init_classCapacity();
 init_prisma_result();
 function normalizeMemberImportRows(value) {
@@ -18159,8 +18756,8 @@ async function importMemberContacts(_root, args, context) {
   const prisma = guardKeystonePrismaResults(context.prisma);
   const results = [];
   for (const row of rows) {
-    const key = (0, import_node_crypto19.createHash)("sha256").update(JSON.stringify([organizationId, source, row.externalId])).digest("hex");
-    const payloadHash = (0, import_node_crypto19.createHash)("sha256").update(JSON.stringify(row)).digest("hex");
+    const key = (0, import_node_crypto20.createHash)("sha256").update(JSON.stringify([organizationId, source, row.externalId])).digest("hex");
+    const payloadHash = (0, import_node_crypto20.createHash)("sha256").update(JSON.stringify(row)).digest("hex");
     const existing = await prisma.memberImportRecord.findUnique({ where: { key } });
     if (existing && existing.payloadHash !== payloadHash) {
       results.push({ externalId: row.externalId, status: "conflict", message: "External ID was previously used for different contact details; review the existing record" });
@@ -18206,7 +18803,7 @@ async function importMemberContacts(_root, args, context) {
 }
 
 // features/keystone/mutations/retailLifecycle.ts
-var import_node_crypto20 = __toESM(require("node:crypto"));
+var import_node_crypto21 = __toESM(require("node:crypto"));
 init_prisma_result();
 init_operational_notices();
 init_classCapacity();
@@ -18243,12 +18840,12 @@ function quoteSecret() {
   if (secret.length < 32) throw new Error("Price review is unavailable on this deployment");
   return secret;
 }
-var quoteMac = (body) => import_node_crypto20.default.createHmac("sha256", quoteSecret()).update(`retail-quote:v1:${body}`).digest("base64url");
+var quoteMac = (body) => import_node_crypto21.default.createHmac("sha256", quoteSecret()).update(`retail-quote:v1:${body}`).digest("base64url");
 function readQuote(token, actor2, locationId) {
   const [body, mac] = typeof token === "string" ? token.split(".") : [];
   if (!body || !mac || body.length > 2e4) throw new Error("Review the sale's prices before recording it");
   const expected = Buffer.from(quoteMac(body)), supplied = Buffer.from(mac);
-  if (expected.length !== supplied.length || !import_node_crypto20.default.timingSafeEqual(expected, supplied)) throw new Error("Review the sale's prices before recording it");
+  if (expected.length !== supplied.length || !import_node_crypto21.default.timingSafeEqual(expected, supplied)) throw new Error("Review the sale's prices before recording it");
   const quote = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
   if (quote.v !== 1 || quote.organizationId !== actor2.organizationId || quote.userId !== actor2.userId || quote.locationId !== locationId) throw new Error("This price review belongs to another sale; review the prices again");
   return quote;
@@ -18976,13 +19573,14 @@ function extendGraphqlSchema(baseSchema) {
         activeMemberships: Int!
         pastDueCount: Int!
       }
-    `, trainingWorkspaceTypeDefs, retailTypeDefs, counterPaymentTypeDefs, dropInTypeDefs, roomTypeDefs, giftCardTypeDefs, staffIntentTypeDefs, coachProfileTypeDefs],
+    `, trainingWorkspaceTypeDefs, retailTypeDefs, counterPaymentTypeDefs, dropInTypeDefs, roomTypeDefs, packTypeDefs, giftCardTypeDefs, staffIntentTypeDefs, coachProfileTypeDefs],
     resolvers: {
       Query: {
         retailWorkspace,
         retailSaleItems,
         studioSettingsEditor,
         classAvailability,
+        myCredits,
         roomsWorkspace,
         trainingWorkspace: getTrainingWorkspace,
         operationsWorkspace,
@@ -19057,6 +19655,9 @@ function extendGraphqlSchema(baseSchema) {
         runOperationsCommand,
         bookClass,
         joinWaitlist,
+        startPackCheckout,
+        completePackCheckout,
+        adjustCredits,
         leaveWaitlist,
         changeBookingSpot,
         saveRoomLayout,
@@ -19189,6 +19790,8 @@ function throwingDelegate(delegate) {
   delegates.set(delegate, wrapped);
   return wrapped;
 }
+var TRANSACTION_MAX_WAIT_MS = Number(process.env.DATABASE_TRANSACTION_MAX_WAIT_MS) || 15e3;
+var TRANSACTION_TIMEOUT_MS = Number(process.env.DATABASE_TRANSACTION_TIMEOUT_MS) || 3e4;
 function throwKeystonePrismaErrors(client) {
   const cached = clients.get(client);
   if (cached) return cached;
@@ -19197,7 +19800,7 @@ function throwKeystonePrismaErrors(client) {
       const value = Reflect.get(target, key, target);
       if (key === "$transaction" && typeof value === "function") {
         return (work, ...options) => {
-          if (typeof work === "function") return value.call(target, (tx) => work(throwKeystonePrismaErrors(tx)), ...options);
+          if (typeof work === "function") return value.call(target, (tx) => work(throwKeystonePrismaErrors(tx)), { maxWait: TRANSACTION_MAX_WAIT_MS, timeout: TRANSACTION_TIMEOUT_MS, ...options[0] ?? {} });
           return Promise.resolve(value.call(target, work, ...options)).then((results) => Array.isArray(results) ? results.map(rethrowKeystonePrismaError) : results);
         };
       }
@@ -19344,7 +19947,7 @@ var { withAuth } = (0, import_auth2.createAuth)({
   `
 });
 var keystone_default = withAuth(
-  (0, import_core42.config)({
+  (0, import_core41.config)({
     db: {
       provider: "postgresql",
       url: pooledDatabaseUrl(databaseURL),

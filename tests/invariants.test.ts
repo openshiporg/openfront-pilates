@@ -38,11 +38,10 @@ test("records that history or access depends on can't be deleted out from under 
 });
 
 test("the database refuses out-of-range money, credits, stock and backwards times", () => {
-  const sql = source("migrations/20261122140100_studio_invariants/migration.sql");
+  const sql = ["migrations/20261122140100_studio_invariants/migration.sql", "migrations/20261122165004_credit_ledger_packs_tiers/migration.sql"].map(source).join("\n");
   for (const name of [
     "GiftCard_balance_range", "TrainingPackage_credit_range", "TrainingPackage_refund_range", "RetailItem_stock_price_nonnegative",
-    "Payment_refund_range", "MembershipPayment_refund_range", "MembershipCreditGrant_remaining_range",
-    "MembershipCreditGrant_period_order", "Appointment_time_order", "ClassInstance_time_order", "RetailClose_period_order",
+    "Payment_refund_range", "MembershipPayment_refund_range", "CreditGrant_balance_range", "CreditGrant_period_order", "Appointment_time_order", "ClassInstance_time_order", "RetailClose_period_order",
     "Payment_organization_paymentIntent_key",
   ]) assert.ok(sql.includes(`"${name}"`), name);
   assert.match(sql, /RAISE EXCEPTION/);

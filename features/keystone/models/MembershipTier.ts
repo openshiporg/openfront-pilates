@@ -193,6 +193,26 @@ export const MembershipTier = list({
     }),
 
     // Stripe integration
+    // Dissertation D10. The billed period of the recurring ("monthly") Stripe price: week, fortnight,
+    // four weeks or calendar month. classCreditsPerMonth is the allowance per billed period (-1 unlimited).
+    billingPeriod: select({
+      type: "string",
+      options: [{ label: "Weekly", value: "week" }, { label: "Fortnightly", value: "fortnight" }, { label: "Every 4 weeks", value: "four_weeks" }, { label: "Monthly", value: "month" }],
+      defaultValue: "month",
+      validation: { isRequired: true },
+    }),
+    maxBookingsPerDay: integer({ defaultValue: 0, validation: { min: 0, max: 20 }, ui: { description: "0 = no daily cap. 'Unlimited' is commonly 1 a day." } }),
+    maxBookingsPerMonth: integer({ defaultValue: 0, validation: { min: 0, max: 1000 }, ui: { description: "0 = no monthly cap; counts attended and upcoming bookings in the calendar month" } }),
+    cancelNoticeDays: integer({ defaultValue: 30, validation: { min: 0, max: 365 } }),
+    freezeMinDays: integer({ defaultValue: 7, validation: { min: 1, max: 365 } }),
+    freezeMaxDays: integer({ defaultValue: 30, validation: { min: 1, max: 365 } }),
+    freezeDaysPerYear: integer({ defaultValue: 30, validation: { min: 0, max: 365 } }),
+    freezeFee: integer({ defaultValue: 0, validation: { min: 0, max: 100000 }, ui: { description: "Cents, charged at the desk or on the next invoice" } }),
+    advanceBookingDays: integer({ defaultValue: 14, validation: { min: 1, max: 90 }, ui: { description: "How many days ahead a member on this plan can book" } }),
+    offPeakOnly: checkbox({ defaultValue: false }),
+    /** Off-peak windows: [{ days: [1..7], from: "HH:MM", to: "HH:MM" }] in the studio's time zone. */
+    offPeakWindows: json({ defaultValue: [{ days: [1, 2, 3, 4, 5], from: "09:00", to: "16:00" }, { days: [6, 7], from: "12:00", to: "21:00" }] }),
+    rolloverPeriods: integer({ defaultValue: 0, validation: { min: 0, max: 1 }, ui: { description: "Unused credits roll over one period (0 or 1)" } }),
     stripeMonthlyPriceId: text({
       access: { read: permissions.canManageAllRecords },
       isFilterable: permissions.canManageAllRecords,

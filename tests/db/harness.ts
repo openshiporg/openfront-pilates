@@ -13,6 +13,12 @@ let cached: any = null;
 export async function keystoneContext() {
   if (cached) return cached;
   process.env.DATABASE_URL = dbUrl;
+  // A shared test server: a small pool still makes parallel bookings contend for the same locks.
+  process.env.DATABASE_CONNECTION_LIMIT ||= "5";
+  // The shared scratch server is remote (~230 ms a query); 20 bookings serialised on one member
+  // lock wait minutes, not the seconds a co-located database takes.
+  process.env.DATABASE_TRANSACTION_MAX_WAIT_MS ||= "600000";
+  process.env.DATABASE_TRANSACTION_TIMEOUT_MS ||= "600000";
   process.env.SESSION_SECRET ||= "x".repeat(40);
   const config = (await import("../../keystone")).default;
   const PrismaModule = await import("@prisma/client");

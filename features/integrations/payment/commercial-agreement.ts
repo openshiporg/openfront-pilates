@@ -55,6 +55,11 @@ export function snapshotMembershipAgreement(
     freezeAllowed: Boolean(tier.freezeAllowed),
     contractLength: tier.contractLength ?? 0, cancellationPolicy: "paid_period_end",
     guestPasses: tier.guestPasses ?? 0, maxClassBookings: tier.maxClassBookings ?? 0, personalTrainingSessions: tier.personalTrainingSessions ?? 0,
+    // D10 rules fixed at joining, so a founding rate and its terms stay while the membership is active.
+    billingPeriod: tier.billingPeriod ?? "month", maxBookingsPerDay: tier.maxBookingsPerDay ?? 0, maxBookingsPerMonth: tier.maxBookingsPerMonth ?? 0,
+    cancelNoticeDays: tier.cancelNoticeDays ?? 30, freezeMinDays: tier.freezeMinDays ?? 7, freezeMaxDays: tier.freezeMaxDays ?? 30,
+    freezeDaysPerYear: tier.freezeDaysPerYear ?? 30, freezeFee: tier.freezeFee ?? 0, advanceBookingDays: tier.advanceBookingDays ?? 14,
+    offPeakOnly: Boolean(tier.offPeakOnly), offPeakWindows: tier.offPeakWindows ?? [], rolloverPeriods: tier.rolloverPeriods ?? 0,
   };
 }
 
@@ -75,39 +80,48 @@ export function acceptedProviderPrice(agreement: any, fallbacks: { checkoutPrice
 }
 
 const providerId = (value: any) => typeof value === "string" ? value : value?.id || null;
-const cycleInterval = (billingCycle: string) => billingCycle === "annual" ? "year" : "month";
+/** Stripe interval and count for a billed period (D10: weekly, fortnightly, 4-weekly, monthly; or annual). */
+export function periodInterval(billingCycle: string, billingPeriod?: string | null): { interval: "week" | "month" | "year"; count: number; days: [number, number] } {
+  if (billingCycle === "annual") return { interval: "year", count: 1, days: [364, 367] };
+  if (billingPeriod === "week") return { interval: "week", count: 1, days: [6.5, 7.5] };
+  if (billingPeriod === "fortnight") return { interval: "week", count: 2, days: [13.5, 14.5] };
+  if (billingPeriod === "four_weeks") return { interval: "week", count: 4, days: [27.5, 28.5] };
+  return { interval: "month", count: 1, days: [27, 32] };
+}
 
-function priceProblem(price: any, quantity: unknown, accepted: AcceptedProviderPrice, billingCycle: string) {
+function priceProblem(price: any, quantity: unknown, accepted: AcceptedProviderPrice, billingCycle: string, billingPeriod?: string | null) {
   if (price?.id !== accepted.priceId) return `bills price ${price?.id || "none"} instead of the accepted ${accepted.priceId}`;
   if (accepted.productId && providerId(price?.product) && providerId(price.product) !== accepted.productId) return "bills a different product";
   if ((quantity ?? 1) !== 1) return `bills quantity ${quantity}`;
   if (String(price?.currency || "").toUpperCase() !== "USD") return "bills a currency other than USD";
-  if (price?.recurring && (price.recurring.interval !== cycleInterval(billingCycle) || (price.recurring.interval_count ?? 1) !== 1)) return `bills every ${price.recurring.interval_count ?? 1} ${price.recurring.interval} instead of the accepted ${billingCycle} cycle`;
+  const expected = periodInterval(billingCycle, billingPeriod);
+  if (price?.recurring && (price.recurring.interval !== expected.interval || (price.recurring.interval_count ?? 1) !== expected.count)) return `bills every ${price.recurring.interval_count ?? 1} ${price.recurring.interval} instead of the accepted ${billingPeriod || billingCycle} period`;
   if (accepted.amount !== null && Number.isSafeInteger(price?.unit_amount) && price.unit_amount !== accepted.amount) return "bills a different amount than the accepted agreement";
   return null;
 }
 
 /** Why a provider subscription's items aren't exactly the accepted agreement, or null. */
-export function subscriptionItemsProblem(subscription: any, accepted: AcceptedProviderPrice | null, billingCycle: string) {
+export function subscriptionItemsProblem(subscription: any, accepted: AcceptedProviderPrice | null, billingCycle: string, billingPeriod?: string | null) {
   if (!accepted) return "no accepted provider price is recorded for this membership";
   const items = subscription?.items?.data || [];
   if (items.length !== 1) return `has ${items.length} billed items instead of one`;
-  return priceProblem(items[0].price, items[0].quantity, accepted, billingCycle);
+  return priceProblem(items[0].price, items[0].quantity, accepted, billingCycle, billingPeriod);
 }
 
 /** Why a paid invoice's service lines don't establish the accepted agreement's period, or null. */
-export function invoiceServiceProblem(invoice: any, accepted: AcceptedProviderPrice | null, billingCycle: string) {
+export function invoiceServiceProblem(invoice: any, accepted: AcceptedProviderPrice | null, billingCycle: string, billingPeriod?: string | null) {
   if (!accepted) return "no accepted provider price is recorded for this membership";
   const lines = (invoice?.lines?.data || []).filter((line: any) => line.type === "subscription" && !line.proration);
   if (lines.length !== 1) return `has ${lines.length} recurring service lines instead of one`;
   const line = lines[0];
-  const problem = priceProblem(line.price, line.quantity, accepted, billingCycle);
+  const problem = priceProblem(line.price, line.quantity, accepted, billingCycle, billingPeriod);
   if (problem) return problem;
   if (!Number.isSafeInteger(line.amount) || line.amount <= 0) return "has no positive amount for its service line";
   const start = line.period?.start, end = line.period?.end;
   if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start) return "has an invalid service period";
   const days = (end - start) / 86_400;
-  if (billingCycle === "annual" ? days < 364 || days > 367 : days < 27 || days > 32) return `covers ${Math.round(days)} days, not one ${billingCycle === "annual" ? "year" : "month"}`;
+  const span = periodInterval(billingCycle, billingPeriod).days;
+  if (days < span[0] || days > span[1]) return `covers ${Math.round(days)} days, not one ${billingPeriod && billingCycle !== "annual" ? billingPeriod.replace("_", " ") : billingCycle === "annual" ? "year" : "month"}`;
   return null;
 }
 

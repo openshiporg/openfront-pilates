@@ -261,6 +261,7 @@ export async function initiateMembershipCheckoutForUser(input: {
       amount,
       currencyCode,
       billingCycle: input.billingCycle,
+      billingPeriod: input.billingCycle === "annual" ? null : tier.billingPeriod ?? "month",
     });
     await ensureMemberProfile(input.context, user);
   } catch (error) {

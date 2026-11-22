@@ -67,7 +67,7 @@ test("8. a cancel before the cutoff promotes position 1 into the freed machine; 
   const promoted = await s.prisma.classBooking.findFirst({ where: { classInstanceId: s.instance.id, status: "confirmed" } });
   assert.equal(promoted.memberId, next.member.id, "the client with no usable credit is skipped");
   assert.equal(promoted.spotId, s.spots[0].id, "promoted into the freed machine");
-  const debit = await s.prisma.membershipCreditEntry.findUnique({ where: { key: `${promoted.id}:debit` } });
+  const debit = await s.prisma.creditEntry.findFirst({ where: { eventKey: `${promoted.id}:debit` } });
   assert.equal(debit?.delta, -1, "promotion spends a credit");
   const skipped = await s.prisma.classBooking.findFirst({ where: { classInstanceId: s.instance.id, memberId: broke.member.id } });
   assert.equal(skipped.status, "waitlisted");

@@ -23,19 +23,20 @@ function fakePrisma(opts: { attended?: boolean; startsIn?: number; status?: stri
     classBooking: {
       findFirst: async ({ where }: any) => (scoped(where) ? booking : null),
       findMany: async () => [],
+      findUnique: async () => ({ organizationId: ORG }),
       update: async (args: any) => { log.bookingUpdates.push(args); return args; },
     },
     attendanceRecord: {
       findFirst: async ({ where }: any) => (opts.attended && where.bookingId === booking.id && where.organizationId === ORG ? { id: "att_1" } : null),
     },
-    membershipCreditEntry: {
-      findUnique: async ({ where }: any) => (where.key === "booking_1:debit" && opts.debit !== false ? { grantId: "grant_1", delta: -1 } : null),
+    creditEntry: {
+      findFirst: async ({ where }: any) => (where.eventKey === "booking_1:debit" && opts.debit !== false ? { grantId: "grant_1", delta: -1, bookingId: "booking_1" } : null),
       create: async (args: any) => { log.credits.push(args.data); return args.data; },
     },
-    membershipCreditGrant: {
-      findUnique: async () => ({ id: "grant_1", organizationId: ORG, membershipId: "ms_1", allowance: 8, remaining: 3 }),
+    creditGrant: {
+      findUnique: async () => ({ id: "grant_1", organizationId: ORG, memberId: "member_1", membershipId: "ms_1", quantity: 8, remaining: 3, status: "active" }),
       findFirst: async () => null,
-      update: async (args: any) => { log.credits.push({ grantUpdate: args.data }); return args; },
+      update: async (args: any) => { log.credits.push({ grantUpdate: args.data }); return { id: "grant_1", organizationId: ORG, memberId: "member_1", remaining: args.data.remaining }; },
     },
     membership: { findUnique: async () => null, update: async () => null },
     operationalNotice: { upsert: async (args: any) => { log.notices.push(args.create); return args.create; } },
@@ -49,7 +50,7 @@ test("staff can cancel an unmarked confirmed booking after the class started; cr
   const result = await cancelCapacityControlledBooking(prisma, { bookingId: "booking_1", actor: operator, pastBookingReason: "  QA test cleanup " });
   assert.equal(result.cancelled, true);
   assert.equal(log.bookingUpdates[0].data.status, "cancelled");
-  assert.ok(log.credits.some((entry) => entry.key === "booking_1:restore" && entry.kind === "restoration"), "credit restored like a normal cancel");
+  assert.ok(log.credits.some((entry) => entry.eventKey === "booking_1:restore" && entry.kind === "restore"), "credit restored like a normal cancel");
   assert.equal(log.notices.length, 1);
   assert.equal(log.notices[0].kind, "cancellation");
   assert.deepEqual(log.notices[0].history.map((h: any) => [h.action, h.actorId, h.note]), [["past_booking_cancelled", "staff_1", "QA test cleanup"]]);

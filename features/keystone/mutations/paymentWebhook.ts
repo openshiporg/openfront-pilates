@@ -17,6 +17,7 @@ import { ownsCounterPayment, reconcileCounterCheckoutEvent, reconcileCounterRefu
 import { COUNTER_SOURCE } from "../lib/counter-card-payment";
 import { DROP_IN_SOURCE, fulfillDropInCheckout } from "./dropIn";
 import { GIFT_CARD_SOURCE, fulfillGiftCardCheckout } from "./giftCards";
+import { PACK_SOURCE, fulfillPackCheckout } from "./packs";
 import { acceptedProviderPrice, invoiceServiceProblem, subscriptionItemsProblem } from "../../integrations/payment/commercial-agreement";
 
 const PROVIDER_CODE = "pp_stripe";
@@ -200,7 +201,7 @@ export async function syncSubscription(
     const priceTier = await tierForProviderPrice(transaction, subscription, organizationId);
     let tierId: string | null = membership?.tierId || checkout?.membershipTierId || null;
     const accepted = await membershipAcceptedPrice(transaction, membership, checkout);
-    const itemProblem = subscriptionItemsProblem(subscription, accepted, membership?.billingCycle || checkout?.billingCycle || "monthly");
+    const itemProblem = subscriptionItemsProblem(subscription, accepted, membership?.billingCycle || checkout?.billingCycle || "monthly", membership?.agreementSnapshot?.billingPeriod);
     if (!membership && checkout && itemProblem) {
       throw new Error(`Subscription doesn't match its checkout agreement (it ${itemProblem}); operator reconciliation required`);
     }
@@ -404,7 +405,7 @@ export async function recordInvoicePayment(
     // for anything else stays recorded as a receipt and goes to finance review, granting nothing.
     const grantsPeriod = status === "succeeded" && ["subscription_create", "subscription_cycle"].includes(invoice.billing_reason || "");
     const serviceProblem = grantsPeriod
-      ? invoiceServiceProblem(invoice, await membershipAcceptedPrice(tx, membership, session), membership.billingCycle)
+      ? invoiceServiceProblem(invoice, await membershipAcceptedPrice(tx, membership, session), membership.billingCycle, membership.agreementSnapshot?.billingPeriod)
       : null;
     if (serviceProblem) {
       const pendingTierChange = await tx.membershipBillingAttempt.findFirst({
@@ -632,7 +633,7 @@ export async function handleStripeWebhook(context: Context, payload: string, sig
   const source = object.metadata?.source || object.subscription_details?.metadata?.source || object.parent?.subscription_details?.metadata?.source;
   // Payouts belong to the verified merchant account itself; counter payments carry their own
   // source. Anything else must correlate with a Studio subscription or payment.
-  if (source !== 'openfront-pilates' && source !== COUNTER_SOURCE && source !== DROP_IN_SOURCE && source !== GIFT_CARD_SOURCE && object.object !== 'payout') {
+  if (source !== 'openfront-pilates' && source !== COUNTER_SOURCE && source !== DROP_IN_SOURCE && source !== GIFT_CARD_SOURCE && source !== PACK_SOURCE && object.object !== 'payout') {
     const prisma = guardKeystonePrismaResults(context.prisma as any);
     const subscriptionId = object.object === 'subscription' ? object.id : typeof object.subscription === 'string' ? object.subscription : object.subscription?.id;
     const paymentIntentId = typeof object.payment_intent === 'string' ? object.payment_intent : object.payment_intent?.id;
@@ -752,6 +753,9 @@ async function processVerifiedPaymentEvent(context: Context, provider: any, adap
           await reconcileCounterCheckoutEvent(context, organizationId, session);
         } else if (session.metadata?.source === DROP_IN_SOURCE) {
           await fulfillDropInCheckout(context, organizationId, session.id);
+        } else if (session.metadata?.source === PACK_SOURCE) {
+          // The event is signature-verified, so its session is the provider's own record.
+          await fulfillPackCheckout(context, organizationId, session.id, { session, providerId: provider.id });
         } else if (session.metadata?.source === GIFT_CARD_SOURCE) {
           await fulfillGiftCardCheckout(context, organizationId, session.id);
         } else if (session.mode === "subscription" && event.type === "checkout.session.completed") {
@@ -765,6 +769,7 @@ async function processVerifiedPaymentEvent(context: Context, provider: any, adap
         if (session.metadata?.source === COUNTER_SOURCE) await reconcileCounterCheckoutEvent(context, organizationId, session);
         else if (session.metadata?.source === DROP_IN_SOURCE) await fulfillDropInCheckout(context, organizationId, session.id);
         else if (session.metadata?.source === GIFT_CARD_SOURCE) await fulfillGiftCardCheckout(context, organizationId, session.id);
+        else if (session.metadata?.source === PACK_SOURCE) await fulfillPackCheckout(context, organizationId, session.id);
         else await expireCheckoutSession(context, session, organizationId);
         break;
       }
