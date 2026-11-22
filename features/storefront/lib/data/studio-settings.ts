@@ -1,0 +1,76 @@
+import { gql } from "graphql-request";
+import { studioClient } from "@/features/storefront/lib/config";
+
+export type StudioSettingsData = {
+  id: string;
+  /** False while the club is suspended: accounts, history and recovery stay open; new sales don't. */
+  salesOpen: boolean;
+  name: string;
+  tagline?: string | null;
+  logoIcon?: string | null;
+  logoColor?: string | null;
+  brandHue: number;
+  description?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  currencyCode?: string | null;
+  /** Online drop-in class price in cents; 0 when drop-ins are front-desk only. */
+  dropInPrice?: number | null;
+  lateCancelHours?: number | null;
+  locale?: string | null;
+  timezone?: string | null;
+  countryCode?: string | null;
+  hours?: Record<string, unknown> | null;
+  heroEyebrow?: string | null;
+  heroHeadline?: string | null;
+  heroSubheadline?: string | null;
+  heroImageUrl?: string | null;
+  heroPrimaryCtaLabel?: string | null;
+  heroPrimaryCtaHref?: string | null;
+  heroSecondaryCtaLabel?: string | null;
+  heroSecondaryCtaHref?: string | null;
+  promoBanner?: string | null;
+  footerTagline?: string | null;
+  copyrightName?: string | null;
+  facilityHeadline?: string | null;
+  facilityDescription?: string | null;
+  facilityHighlights?: any[] | null;
+  heroStats?: any[] | null;
+  contactTopics?: any[] | null;
+  /** Published participation terms, or null. `acceptanceRequired` is false for the onboarding placeholder. */
+  participationTerms?: { policyId: string; version: string; text: string; acceptanceRequired: boolean } | null;
+};
+
+export async function getStudioSettings(): Promise<StudioSettingsData | null> {
+  const result = await studioClient.request<{ publicStudioSettings: (Omit<StudioSettingsData, "heroImageUrl"> & { heroImagePath?: string | null }) | null }>(gql`
+    query StorefrontStudioSettings {
+      publicStudioSettings {
+        id salesOpen name tagline logoIcon logoColor brandHue description address phone email currencyCode dropInPrice lateCancelHours locale timezone countryCode hours
+        heroEyebrow heroHeadline heroSubheadline heroImagePath
+        heroPrimaryCtaLabel heroPrimaryCtaHref heroSecondaryCtaLabel heroSecondaryCtaHref
+        promoBanner footerTagline copyrightName facilityHeadline facilityDescription
+        facilityHighlights heroStats contactTopics participationTerms
+      }
+    }
+  `);
+  const settings = result.publicStudioSettings;
+  return settings ? { ...settings, heroImageUrl: settings.heroImagePath ?? null } : null;
+}
+
+export async function getPrimaryLocation() {
+  const settings = await getStudioSettings();
+  if (!settings) return null;
+  return { id: settings.id, name: settings.name, address: settings.address, phone: settings.phone };
+}
+
+export async function getStorefrontConfig() {
+  const settings = await getStudioSettings();
+  if (!settings) return null;
+  return {
+    ...settings,
+    address: settings.address || "",
+    phone: settings.phone || "",
+    locationName: settings.name,
+  };
+}

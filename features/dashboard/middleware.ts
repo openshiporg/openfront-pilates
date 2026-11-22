@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
-import { getGraphQLEndpoint } from "@/features/dashboard/lib/getBaseUrl";
+import { getServerGraphQLTarget } from "@/features/dashboard/lib/getBaseUrl";
 import { GraphQLClient } from 'graphql-request';
 import { safeErrorSummary, sanitizeDashboardRedirect } from './lib/security';
 import { isDashboardRoute, publicSignUpsAllowed } from './lib/authFlow';
@@ -8,11 +8,15 @@ import { isDashboardRoute, publicSignUpsAllowed } from './lib/authFlow';
 const basePath = "/dashboard";
 
 // Create a GraphQL client for middleware with explicit headers
-async function createMiddlewareGraphQLClient(headers: Record<string, string>): Promise<GraphQLClient> {
-  const endpoint = await getGraphQLEndpoint();
+async function createMiddlewareGraphQLClient(
+  headers: Record<string, string>,
+  sourceHeaders?: { get(name: string): string | null },
+): Promise<GraphQLClient> {
+  const { endpoint, fetch: internalFetch } = await getServerGraphQLTarget(sourceHeaders);
   return new GraphQLClient(endpoint, {
     credentials: 'include',
     redirect: 'error',
+    ...(internalFetch ? { fetch: internalFetch } : {}),
     headers,
   });
 }
@@ -30,7 +34,7 @@ export async function checkInitStatus(request: NextRequest) {
   };
 
   try {
-    const client = await createMiddlewareGraphQLClient(headers);
+    const client = await createMiddlewareGraphQLClient(headers, request.headers);
     const data = await client.request(query) as { redirectToInit: boolean };
     return data.redirectToInit;
   } catch (error) {
@@ -60,7 +64,7 @@ export async function getAuthenticatedUser(request: NextRequest) {
   };
 
   try {
-    const client = await createMiddlewareGraphQLClient(headers);
+    const client = await createMiddlewareGraphQLClient(headers, request.headers);
     const data = await client.request(query) as { 
       authenticatedItem: any; 
       redirectToInit: boolean 
@@ -95,7 +99,7 @@ export async function handleDashboardRoutes(
   const isSignupRoute = isDashboardRoute(pathname, 'signup') && publicSignUpsAllowed();
   const isNoAccessRoute = isDashboardRoute(pathname, 'no-access');
   const isResetRoute = isDashboardRoute(pathname, 'reset');
-  const fromPath = sanitizeDashboardRedirect(request.nextUrl.searchParams.get("from"));
+  const fromPath = request.nextUrl.searchParams.get("from");
 
   // Handle redirectToInit for dashboard routes
   if (redirectToInit) {
@@ -122,7 +126,7 @@ export async function handleDashboardRoutes(
   // Handle authenticated users trying to access signin
   if (user && (isSigninRoute || isSignupRoute || isResetRoute)) {
     if (fromPath && !fromPath.includes("no-access")) {
-      return NextResponse.redirect(new URL(fromPath, request.url));
+      return NextResponse.redirect(new URL(sanitizeDashboardRedirect(fromPath), request.url));
     }
     return NextResponse.redirect(new URL(basePath, request.url));
   }

@@ -1,6 +1,5 @@
 "use client"
 
-import { safeErrorSummary } from '@/features/dashboard/lib/security';
 import Link from "next/link";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ChevronDown, ChevronUp } from "lucide-react";
@@ -110,7 +109,7 @@ export function ListTable({
         });
       }
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'An unexpected error occurred';
+      const errorMessage = 'Unable to delete the selected items. Please try again.';
       setError(errorMessage);
       toast.error(errorMessage);
     } finally {
@@ -173,7 +172,7 @@ export function ListTable({
           );
         }
       } catch (err) {
-        console.error(`Failed to render cell for field ${fieldKey}:`, safeErrorSummary(err));
+        console.warn("Dashboard operation failed (details redacted).");
       }
     }
 

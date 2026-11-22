@@ -1,6 +1,5 @@
 "use client";
 
-import { safeErrorSummary } from '@/features/dashboard/lib/security';
 import React, { Fragment } from "react";
 import { useListQuery } from "@/features/dashboard/hooks/useList.query";
 import { useAuthenticatedUserQuery } from "@/features/dashboard/hooks/useAuth.query";
@@ -59,8 +58,8 @@ function LinkToRelatedItems({ itemId, value, list, refFieldKey }: any) {
   if (value?.kind === "many") {
     const query = constructQuery({ refFieldKey, value, itemId });
     return (
-      <Button variant="ghost">
-        <Link href={`/dashboard/${list?.path ?? ''}?${query}`}>View related {list?.plural ?? 'items'}</Link>
+      <Button variant="ghost" className="h-auto min-h-9 max-w-full whitespace-normal text-left">
+        <Link href={`/dashboard/${list?.path ?? ''}?${query}`} className="break-words">View related {list?.plural ?? 'items'}</Link>
       </Button>
     );
   }
@@ -96,7 +95,7 @@ export function ClientField({
 
   // Handle auth error state
   if (authError) {
-    console.error("Error fetching authenticated user:", safeErrorSummary(authError));
+    console.error("Dashboard operation failed (details redacted).");
   }
 
   const authenticatedItem =
@@ -212,6 +211,7 @@ export function ClientField({
                 <>
                   <Button 
                     variant="outline"
+                    className="h-auto min-h-9 max-w-full whitespace-normal text-left"
                     onClick={() => setIsDrawerOpen(true)}
                   >
                     Create related {foreignList.singular}

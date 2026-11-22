@@ -128,18 +128,19 @@ export function CreatePageClient({ listKey, list }: CreatePageClientProps) {
         actions={
           <Button
             size="sm"
-            className="sm:text-sm text-xs"
+            className="min-w-0 max-w-full shrink sm:text-sm text-xs"
             onClick={handleSave}
             disabled={createItem.state === 'loading'}
+            title={`Create ${list.singular}`}
           >
-            Create {list.singular}
-            <Check className="ml-1 stroke-[1.5px]" width="8" height="8" />
+            <span className="truncate">Create {list.singular}</span>
+            <Check className="ml-1 shrink-0 stroke-[1.5px]" width="8" height="8" />
           </Button>
         }
       />
       
       <div className="w-full max-w-5xl p-4 md:p-6">
-        <div className="grid lg:grid-cols-[minmax(240px,2fr)_3fr] gap-6 gap-y-8">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(240px,2fr)_3fr] gap-6 gap-y-8">
           {/* Sidebar */}
           <aside className="lg:sticky lg:top-24 lg:self-start lg:max-h-[calc(100vh-7.5rem)] flex flex-col h-full">
             <div className="space-y-6 flex-grow overflow-y-auto pb-2">

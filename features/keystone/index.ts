@@ -1,27 +1,77 @@
+import { s3ForcePathStyle } from "./lib/s3-storage";
 import { createAuth } from "@keystone-6/auth";
 import { config } from "@keystone-6/core";
 import "dotenv/config";
 import { models } from "./models";
 import { statelessSessions } from "@keystone-6/core/session";
 import { extendGraphqlSchema } from "./mutations";
-import { sendPasswordResetEmail } from "./lib/mail";
-import { withMcpBearerSessions } from "./mcp-oauth/session";
+import { mailDeliveryEnabled, sendPasswordResetEmail } from "./lib/mail";
+import { permissions } from "./access";
+import { withGraphqlListMaxTake } from "./security/graphql-limits";
+import { pooledDatabaseUrl } from './database-url';
+import { throwKeystonePrismaErrors } from './lib/keystonePrismaErrors';
 
-const databaseURL = process.env.DATABASE_URL || "file:./keystone.db";
+const isNextBuild = process.env.NEXT_PHASE === "phase-production-build";
+const strictConfig = (!isNextBuild && process.env.NODE_ENV === "production") || process.env.STUDIO_STRICT_CONFIG === "true";
+
+// Dashboard self-signup is unsupported for Studio. The request boundary already refuses it
+// (generic createUser needs people-management permission), so a wrong flag is reported
+// instead of preventing every other part of the app from starting.
+if (process.env.PUBLIC_SIGNUPS_ALLOWED === "true") {
+  console.error("PUBLIC_SIGNUPS_ALLOWED=true is not supported for Studio; dashboard signup stays refused. Set it to false.");
+}
+
+function requiredSecret(name: string) {
+  const value = process.env[name];
+  if (strictConfig && (!value || value.length < 32)) {
+    throw new Error(`${name} must be configured with at least 32 characters in strict mode.`);
+  }
+  return value;
+}
+
+// Every environment names its own database, as in E-commerce; there is no built-in local default.
+const databaseURL = process.env.DATABASE_URL || "";
+if (!databaseURL) throw new Error("DATABASE_URL is required (a postgresql:// connection URL).");
+if (!/^postgres(ql)?:\/\//.test(databaseURL)) {
+  throw new Error("DATABASE_URL must be a PostgreSQL connection URL (postgresql://…).");
+}
 
 const sessionConfig = {
-  maxAge: 60 * 60 * 24 * 360, // How long they stay signed in?
-  secret:
-    process.env.SESSION_SECRET || "this secret should only be used in testing",
+  maxAge: 60 * 60 * 24 * 30,
+  secret: requiredSecret("SESSION_SECRET") || "local-only-session-secret-for-tests",
 };
 
-const {
-  S3_BUCKET_NAME: bucketName = "keystone-test",
-  S3_REGION: region = "ap-southeast-2",
-  S3_ACCESS_KEY_ID: accessKeyId = "keystone",
-  S3_SECRET_ACCESS_KEY: secretAccessKey = "keystone",
-  S3_ENDPOINT: endpoint = "https://sfo3.digitaloceanspaces.com",
-} = process.env;
+/**
+ * Optional capabilities (payments, mail, kiosk, partner discovery, member QR codes) are
+ * validated when they are switched on and used; a missing or incomplete one is reported and
+ * stays unavailable, but never stops the dashboard and storefront from starting.
+ */
+function capabilityWarnings() {
+  const warnings: string[] = [];
+  const missing = (name: string, min = 1) => !process.env[name] || process.env[name]!.trim().length < min;
+  for (const flag of ["STRIPE_ENABLED", "MAIL_ENABLED"]) {
+    const value = process.env[flag]?.trim().toLowerCase();
+    if (value !== undefined && value !== "true" && value !== "false") warnings.push(`${flag} must be true or false; treating it as false`);
+  }
+  if (!missing("STRIPE_SECRET_KEY") && missing("STRIPE_WEBHOOK_SECRET", 32)) warnings.push("STRIPE_SECRET_KEY is set without STRIPE_WEBHOOK_SECRET; card payments complete on the return page but webhooks are refused");
+  if (process.env.MAIL_ENABLED === "true" && (missing("SMTP_HOST") || missing("SMTP_FROM"))) warnings.push("Mail is enabled without SMTP_HOST and SMTP_FROM; email is unavailable");
+  if ((!missing("STRIPE_SECRET_KEY") || process.env.MAIL_ENABLED === "true") && missing("NEXTAUTH_URL")) warnings.push("NEXTAUTH_URL (the public site origin) is required for payment returns and email links");
+  if ((process.env.KIOSK_API_TOKEN || process.env.KIOSK_ORGANIZATION_ID) && (missing("KIOSK_API_TOKEN", 32) || missing("KIOSK_ORGANIZATION_ID"))) warnings.push("Kiosk needs both KIOSK_API_TOKEN (32+ characters) and KIOSK_ORGANIZATION_ID; kiosk is unavailable");
+  if ((process.env.DISCOVERY_API_KEY || process.env.DISCOVERY_ORGANIZATION_ID || process.env.DISCOVERY_API_SCOPES) && (missing("DISCOVERY_API_KEY", 32) || missing("DISCOVERY_ORGANIZATION_ID") || missing("DISCOVERY_API_SCOPES"))) warnings.push("Partner discovery is partly configured; it stays unavailable");
+  if (missing("QR_CODE_SECRET", 32)) warnings.push("QR_CODE_SECRET is not set; member check-in codes are unavailable");
+  if (process.env.PUBLIC_MEMBER_SIGNUPS_ALLOWED === "true" && (missing("PUBLIC_MEMBER_SIGNUP_ORGANIZATION_ID") || missing("STOREFRONT_ORGANIZATION_ID"))) warnings.push("Public member signup needs PUBLIC_MEMBER_SIGNUP_ORGANIZATION_ID and STOREFRONT_ORGANIZATION_ID; signup is unavailable");
+  return warnings;
+}
+if (strictConfig) for (const warning of capabilityWarnings()) console.warn(`[studio config] ${warning}`);
+
+const bucketName = process.env.S3_BUCKET_NAME || (strictConfig ? "" : "keystone-test");
+const region = process.env.S3_REGION || (strictConfig ? "" : "ap-southeast-2");
+const accessKeyId = process.env.S3_ACCESS_KEY_ID || (strictConfig ? "" : "keystone");
+const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY || (strictConfig ? "" : "keystone");
+const endpoint = process.env.S3_ENDPOINT || (strictConfig ? "" : "https://sfo3.digitaloceanspaces.com");
+if (strictConfig && (!bucketName || !region || !accessKeyId || !secretAccessKey || !endpoint)) {
+  throw new Error("S3 storage configuration is incomplete in strict mode.");
+}
 
 const { withAuth } = createAuth({
   listKey: "User",
@@ -30,50 +80,97 @@ const { withAuth } = createAuth({
   initFirstItem: {
     fields: ["name", "email", "password"],
     itemData: {
+      // The tenant-ownership migration always creates this deterministic
+      // bootstrap organization before the first account can be initialized.
+      organization: {
+        connect: { id: "studio_default_organization" },
+      },
       role: {
         create: {
+          organization: { connect: { id: "studio_default_organization" } },
           name: "Admin",
-          canCreateTodos: true,
-          canManageAllTodos: true,
+          canCreateRecords: true,
+          canManageAllRecords: true,
           canSeeOtherPeople: true,
           canEditOtherPeople: true,
           canManagePeople: true,
           canManageRoles: true,
           canAccessDashboard: true,
+          canManageOnboarding: true,
+          canManageSettings: true,
+          canManageAppointments: true,
+          canManageCheckIns: true,
+          canManageFacilities: true,
+          canManagePrograms: true,
+          canManageCommunications: true,
+          canManageRetail: true,
+          canManagePayroll: true,
+          canViewReports: true,
         },
       },
     },
   },
   passwordResetLink: {
+    tokensValidForMins: 60,
     async sendToken(args) {
-      // send the email
-      await sendPasswordResetEmail(args.token, args.identity);
+      // The link goes only to the holder's own mailbox. A member account keeps its storefront
+      // channel (even when it also has dashboard access); staff-only accounts reset in the dashboard.
+      // Failures never surface to the caller, so the public reply cannot reveal whether an account
+      // exists; they are logged without identity or token.
+      try {
+        const user = await args.context.sudo().query.User.findOne({ where: { id: String(args.itemId) }, query: "id organization { id } role { canAccessDashboard }" });
+        const members = user ? await args.context.sudo().query.Member.count({ where: { AND: [{ user: { id: { equals: user.id } } }, { organization: { id: { equals: user.organization?.id ?? "" } } }] } }) : 0;
+        if (!mailDeliveryEnabled()) return;
+        const outcome = await sendPasswordResetEmail(args.token, args.identity, { storefront: members > 0, dashboard: Boolean(user?.role?.canAccessDashboard) });
+        if (outcome !== "accepted") console.warn(`Password link mail ${outcome} by the mail server`);
+      } catch {
+        console.warn("Password link mail could not be sent");
+      }
     },
   },
   sessionData: `
     name
     email
+    onboardingStatus
+    organization {
+      id
+      name
+      status
+    }
     role {
       id
       name
-      canCreateTodos
-      canManageAllTodos
+      canCreateRecords
+      canManageAllRecords
       canSeeOtherPeople
       canEditOtherPeople
       canManagePeople
       canManageRoles
       canAccessDashboard
+      canManageOnboarding
+      canManageSettings
+      canManageAppointments
+      canManageCheckIns
+      canManageFacilities
+      canManagePrograms
+      canManageCommunications
+      canManageRetail
+      canManagePayroll
+      canViewReports
+      isInstructor
     }
-  `,
+  `
 });
 
 export default withAuth(
   config({
     db: {
       provider: "postgresql",
-      url: databaseURL,
+      url: pooledDatabaseUrl(databaseURL),
+      // Keystone returns failed queries as values; this makes them throw so transactions roll back.
+      extendPrismaClient: throwKeystonePrismaErrors,
     },
-    lists: models,
+    lists: withGraphqlListMaxTake(models),
     storage: {
       my_images: {
         kind: "s3",
@@ -84,14 +181,13 @@ export default withAuth(
         secretAccessKey,
         endpoint,
         signed: { expiry: 5000 },
-        forcePathStyle: true,
+        forcePathStyle: s3ForcePathStyle(endpoint),
       },
     },
     ui: {
-      isAccessAllowed: ({ session }) => session?.data.role?.canAccessDashboard ?? false,
+      isAccessAllowed: ({ session }) => permissions.canAccessDashboard({ session }),
     },
-    // MCP OAuth bearer tokens resolve to the approving user; everything else is unchanged.
-    session: withMcpBearerSessions(statelessSessions(sessionConfig)),
+    session: statelessSessions(sessionConfig),
     graphql: {
       extendGraphqlSchema,
     },

@@ -4,7 +4,6 @@
 
 'use server'
 
-import { PUBLIC_REQUEST_ERROR, safeErrorSummary } from '@/features/dashboard/lib/security';
 import { keystoneClient } from '../lib/keystoneClient'
 import { getList } from './getList'
 import { getFieldTypeFromViewsIndex } from '../views/getFieldTypeFromViewsIndex'
@@ -70,7 +69,7 @@ function getFieldGraphQLSelection(field: any): string {
         return selectionFn(field.path, field.fieldMeta)
       }
     } catch (error) {
-      console.error(`Could not get field type for viewsIndex ${field.viewsIndex}:`, safeErrorSummary(error))
+      console.warn("Dashboard operation failed (details redacted).")
     }
   }
   
@@ -136,7 +135,7 @@ export async function getListItemsAction(
     const response = await keystoneClient(query, variables, cacheOptions)
     
     if (!response.success) {
-      console.error(`❌ GraphQL query failed:`, PUBLIC_REQUEST_ERROR)
+      console.error(`❌ GraphQL query failed:`, response.error)
       return { success: false, error: response.error }
     }
     
@@ -149,10 +148,10 @@ export async function getListItemsAction(
     }
     
   } catch (error) {
-    console.error(`💥 Error fetching list items for ${listKey}:`, safeErrorSummary(error))
+    console.error("Dashboard operation failed (details redacted).")
     return { 
       success: false, 
-      error: PUBLIC_REQUEST_ERROR
+      error: "Unknown error occurred"
     }
   }
 }

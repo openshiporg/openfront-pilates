@@ -3,7 +3,6 @@
  * Based on Keystone's useCreateItem but adapted for Dashboard 2's SWR patterns
  */
 
-import { PUBLIC_REQUEST_ERROR } from '@/features/dashboard/lib/security';
 import { useState, useMemo, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { serializeValueToOperationItem } from './useHasChanges'
@@ -118,8 +117,7 @@ export function useCreateItem(list: any, enhancedFields: Record<string, any>, op
         ...prev,
         state: 'error',
         error: {
-          networkError: new Error(PUBLIC_REQUEST_ERROR),
-          graphQLErrors: [{ message: PUBLIC_REQUEST_ERROR }]
+          graphQLErrors: [{ message: 'Unable to create the item. Please try again.' }]
         }
       }))
       return null

@@ -1,4 +1,3 @@
-import { PUBLIC_REQUEST_ERROR, safeErrorSummary } from '@/features/dashboard/lib/security';
 import { type ReactNode, Fragment, useContext, useEffect, useRef } from 'react'
 import { type Text, Editor, Transforms } from 'slate'
 import { ReactEditor } from 'slate-react'
@@ -127,7 +126,7 @@ function insertOption(editor: Editor, text: Text, option: Option) {
   try {
     // Safety check for text node
     if (!text || typeof text.text !== 'string') {
-      console.error('Invalid text node in insertOption:', PUBLIC_REQUEST_ERROR)
+      console.warn("Dashboard operation failed (details redacted).")
       return
     }
 
@@ -140,20 +139,20 @@ function insertOption(editor: Editor, text: Text, option: Option) {
     })
     option.insert(editor)
   } catch (error) {
-    console.error('Error in insertOption:', safeErrorSummary(error))
+    console.error("Dashboard operation failed (details redacted).")
   }
 }
 
 export function InsertMenu({ children, text }: { children: ReactNode; text: Text }) {
   // Safety check for text node
   if (!text || typeof text.text !== 'string') {
-    console.error('InsertMenu received invalid text node:', PUBLIC_REQUEST_ERROR)
+    console.warn("Dashboard operation failed (details redacted).")
     return <>{children}</>
   }
 
   // Safety check for children
   if (children === undefined || children === null) {
-    console.error('InsertMenu received invalid children:', PUBLIC_REQUEST_ERROR)
+    console.warn("Dashboard operation failed (details redacted).")
     return <span>{text.text}</span>
   }
 

@@ -1,0 +1,78 @@
+"use server";
+
+import { studioGraphql as keystoneClient } from "@/features/platform/lib/studio-graphql";
+import { staffActionError as safeActionError } from "@/features/platform/lib/action-error";
+
+export type MemberProfileProjection = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  dateOfBirth: string | null;
+  joinDate: string;
+  status: string;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
+  healthNotes: { conditions: string[]; injuries: string[]; notes: string } | null;
+  profilePhotoUrl: string | null;
+  membershipTier: { id: string; name: string; monthlyPrice: number } | null;
+  membershipLengthDays: number;
+  attendanceRate: number;
+  lastCheckIn: string | null;
+  updatedAt: string | null;
+};
+
+const PROFILE_FIELDS = `
+  id name email phone dateOfBirth joinDate status
+  emergencyContactName emergencyContactPhone healthNotes profilePhotoUrl
+  membershipTier { id name monthlyPrice }
+  membershipLengthDays attendanceRate lastCheckIn updatedAt
+`;
+
+export async function getMemberProfileAction(): Promise<MemberProfileProjection> {
+  const response = await keystoneClient<{ memberProfile: MemberProfileProjection }>(`
+    query MemberProfile {
+      memberProfile { ${PROFILE_FIELDS} }
+    }
+  `);
+  if (!response.success) throw new Error(safeActionError(response, "Your member details couldn’t be loaded. Try again."));
+  return response.data.memberProfile;
+}
+
+export async function updateMemberProfileAction(data: {
+  name?: string;
+  phone?: string;
+  dateOfBirth?: string;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+  healthNotes?: { conditions: string[]; injuries: string[]; notes: string };
+  expectedUpdatedAt?: string | null;
+}): Promise<{ success: true; profile: MemberProfileProjection } | { success: false; error: string }> {
+  const response = await keystoneClient<{ updateMemberProfile: MemberProfileProjection }>(`
+    mutation UpdateMemberProfile($data: MemberProfileUpdateInput!) {
+      updateMemberProfile(data: $data) { ${PROFILE_FIELDS} }
+    }
+  `, { data });
+  if (!response.success) return { success: false, error: safeActionError(response, "Your changes could not be saved. Please try again.") };
+  return { success: true, profile: response.data.updateMemberProfile };
+}
+
+export async function getMemberCheckInCodeAction(): Promise<{
+  success: boolean;
+  qrDataUrl: string | null;
+  expiresIn: number;
+  error: string | null;
+}> {
+  const response = await keystoneClient<{
+    memberCheckInCode: { qrDataUrl: string | null; expiresIn: number; error: string | null };
+  }>(`
+    query MemberCheckInCode {
+      memberCheckInCode { qrDataUrl expiresIn error }
+    }
+  `);
+  if (!response.success) {
+    return { success: false, qrDataUrl: null, expiresIn: 0, error: "Check-in code is unavailable right now. Try again shortly." };
+  }
+  const result = response.data.memberCheckInCode;
+  return { success: !result.error && Boolean(result.qrDataUrl), ...result };
+}

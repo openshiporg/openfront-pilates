@@ -4,7 +4,6 @@
 
 'use server'
 
-import { PUBLIC_REQUEST_ERROR, safeErrorSummary } from '@/features/dashboard/lib/security';
 import { keystoneClient } from '../lib/keystoneClient'
 
 export async function getItemValidationAction(listKey: string, itemId: string) {
@@ -33,7 +32,7 @@ export async function getItemValidationAction(listKey: string, itemId: string) {
     const response = await keystoneClient(query, { id: itemId, listKey })
 
     if (!response.success) {
-      console.error('Failed to fetch item validation:', PUBLIC_REQUEST_ERROR)
+      console.error('Failed to fetch item validation:', response.error)
       return response
     }
 
@@ -65,10 +64,10 @@ export async function getItemValidationAction(listKey: string, itemId: string) {
       data: validationMap
     }
   } catch (error) {
-    console.error('Error in getItemValidationAction:', safeErrorSummary(error))
+    console.error("Dashboard operation failed (details redacted).")
     return {
       success: false,
-      error: PUBLIC_REQUEST_ERROR
+      error: "Unknown error"
     }
   }
 }

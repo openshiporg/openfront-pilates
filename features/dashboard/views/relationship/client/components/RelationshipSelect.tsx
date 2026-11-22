@@ -1,4 +1,3 @@
-import { PUBLIC_REQUEST_ERROR } from '@/features/dashboard/lib/security';
 import React, { useState, useEffect, useCallback } from "react";
 import { Select, MultiSelect } from "./Select";
 import type { Option } from "./Select";
@@ -178,7 +177,7 @@ export function RelationshipSelect({
         data: item,
       }));
     } else {
-      console.error("Error fetching relationship options (handleSearch):", PUBLIC_REQUEST_ERROR);
+      console.error("Error fetching relationship options (handleSearch):", result.error);
       return []; // Return empty array on error
     }
   }, [listData, labelField, extraSelection, searchFields, PAGE_SIZE]);

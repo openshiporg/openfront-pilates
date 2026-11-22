@@ -1,0 +1,116 @@
+import { list } from "@keystone-6/core";
+import { allOperations, denyAll } from "@keystone-6/core/access";
+import {
+  text,
+  integer,
+  select,
+  multiselect,
+} from "@keystone-6/core/fields";
+import { document } from "@keystone-6/fields-document";
+
+import { isSignedIn, permissions } from "../access";
+import { tenantFilter } from "../access/tenantPolicy";
+import { trackingFields } from "./trackingFields";
+import { relationship } from "@keystone-6/core/fields";
+import { guardKeystonePrismaResults } from "../lib/prisma-result";
+import { compoundUniqueDb, requiredRelationshipDb, validateTenantOwnership } from "./tenantRelationships";
+
+export const ClassType = list({
+  db: { extendPrismaSchema: compoundUniqueDb("organizationId, name") },
+  hooks: {
+    validateInput: validateTenantOwnership([]),
+    // Every schedule needs a class type (saveClassSchedule refuses one without), so a type in use stays.
+    async validateDelete({ item, context, addValidationError }: any) {
+      const schedules = await guardKeystonePrismaResults(context.prisma as any).classSchedule.count({ where: { classTypeId: item.id } });
+      if (schedules) addValidationError(`${schedules} class ${schedules === 1 ? "schedule uses" : "schedules use"} this class type. Move ${schedules === 1 ? "it" : "them"} to another class type before deleting it.`);
+    },
+  },
+  access: {
+    operation: {
+      query: isSignedIn,
+      create: permissions.canManageAllRecords,
+      update: permissions.canManageAllRecords,
+      delete: permissions.canManageAllRecords,
+    },
+    filter: {
+      query: tenantFilter,
+      update: tenantFilter,
+      delete: tenantFilter,
+    },
+  },
+  ui: {
+    listView: {
+      initialColumns: ["name", "difficulty", "duration", "caloriesBurn"],
+    },
+  },
+  fields: {
+    organization: relationship({
+      ref: "Organization.classTypes",
+      access: { update: () => false },
+      graphql: { isNonNull: { read: true } },
+      db: { extendPrismaSchema: requiredRelationshipDb("organization") },
+    }),
+    name: text({
+      validation: { isRequired: true },
+      ui: {
+        description: "e.g., Yoga, Spin, HIIT, Boxing",
+      },
+    }),
+
+    description: document({
+      formatting: true,
+      links: true,
+    }),
+
+    difficulty: select({
+      type: "string",
+      options: [
+        { label: "Beginner", value: "beginner" },
+        { label: "Intermediate", value: "intermediate" },
+        { label: "Advanced", value: "advanced" },
+        { label: "All Levels", value: "all-levels" },
+      ],
+      defaultValue: "all-levels",
+      validation: { isRequired: true },
+    }),
+
+    duration: integer({
+      validation: { isRequired: true, min: 1, max: 1440 },
+      defaultValue: 60,
+      ui: {
+        description: "Typical duration in minutes",
+      },
+    }),
+
+    equipmentNeeded: multiselect({
+      type: "string",
+      options: [
+        { label: "Mat", value: "mat" },
+        { label: "Weights", value: "weights" },
+        { label: "Resistance Bands", value: "resistance_bands" },
+        { label: "Jump Rope", value: "jump_rope" },
+        { label: "Boxing Gloves", value: "boxing_gloves" },
+        { label: "Cycling Shoes", value: "cycling_shoes" },
+        { label: "Kettlebells", value: "kettlebells" },
+        { label: "Medicine Ball", value: "medicine_ball" },
+        { label: "None", value: "none" },
+      ],
+      defaultValue: [],
+    }),
+
+    caloriesBurn: integer({
+      validation: { min: 0 },
+      ui: {
+        description: "Estimated calories burned per session",
+      },
+    }),
+
+    schedules: relationship({
+      ref: "ClassSchedule.classType",
+      many: true,
+      access: { create: denyAll, update: denyAll },
+    }),
+
+    ...trackingFields,
+  },
+});

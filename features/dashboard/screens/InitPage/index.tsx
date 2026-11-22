@@ -18,6 +18,7 @@ type ActionState = {
   formData: {
     name: string;
     email: string;
+
   };
 };
 
@@ -44,6 +45,7 @@ const initialState: ActionState = {
   formData: {
     name: "",
     email: "",
+
   },
 };
 
@@ -150,6 +152,7 @@ export function InitPage() {
                 autoComplete="new-password"
                 placeholder="••••••••"
                 className="pr-10 bg-muted/40"
+
                 required
               />
               <button

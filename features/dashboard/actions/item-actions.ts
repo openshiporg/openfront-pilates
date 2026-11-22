@@ -1,6 +1,5 @@
 'use server'
 
-import { PUBLIC_REQUEST_ERROR } from '@/features/dashboard/lib/security';
 import { revalidatePath } from 'next/cache'
 import { keystoneClient } from '../lib/keystoneClient'
 
@@ -38,7 +37,7 @@ export async function updateItemAction(listKey: string, id: string, data: Record
   } catch (error) {
     // Return error in Apollo format
     return {
-      errors: [{ message: PUBLIC_REQUEST_ERROR, path: undefined }],
+      errors: [{ message: "Update failed", path: undefined }],
       data: null
     }
   }
@@ -78,7 +77,7 @@ export async function createItemAction(listKey: string, data: Record<string, unk
   } catch (error) {
     // Return error in Apollo format
     return {
-      errors: [{ message: PUBLIC_REQUEST_ERROR, path: undefined }],
+      errors: [{ message: "Create failed", path: undefined }],
       data: null
     }
   }
@@ -116,7 +115,7 @@ export async function deleteItemAction(listKey: string, id: string) {
   } catch (error) {
     // Return error in Apollo format
     return {
-      errors: [{ message: PUBLIC_REQUEST_ERROR, path: undefined }],
+      errors: [{ message: "Delete failed", path: undefined }],
       data: null
     }
   }
@@ -160,7 +159,7 @@ export async function deleteManyItemsAction(
   } catch (error) {
     // Return error in Apollo format
     return {
-      errors: [{ message: PUBLIC_REQUEST_ERROR, path: undefined }],
+      errors: [{ message: "Bulk delete failed", path: undefined }],
       data: null
     }
   }

@@ -5,8 +5,7 @@
 
 'use server'
 
-import { PUBLIC_REQUEST_ERROR, safeErrorSummary } from '@/features/dashboard/lib/security';
-import { keystoneClient } from '../lib/keystoneClient'
+import { keystonePartialQuery } from '../lib/keystoneClient'
 
 export async function getListCounts(
   lists: Array<{
@@ -14,47 +13,36 @@ export async function getListCounts(
     isSingleton?: boolean;
     graphql?: {
       names: {
-        listQueryName?: string;
-        listQueryCountName?: string;
+        listQueryCountName: string;
       };
     };
   }>
 ) {
   try {
+    // Skip counting for singleton lists
     const listsToCount = lists.filter((list) => !list.isSingleton)
-    const singletonLists = lists.filter((list) => list.isSingleton)
 
-    const countQueries = listsToCount.flatMap((list) => {
+    if (listsToCount.length === 0) return { success: true, data: {} }
+
+    // Build a query to get counts for all non-singleton lists at once
+    const countQueries = listsToCount.map((list) => {
       const countName = list.graphql?.names?.listQueryCountName
-      return countName ? [`${list.key}: ${countName}`] : []
+      return `${list.key}: ${countName}`
     })
 
-    const singletonQueries = singletonLists.flatMap((list) => {
-      const listQueryName = list.graphql?.names?.listQueryName
-      return listQueryName ? [`singleton_${list.key}: ${listQueryName}(take: 1) { id }`] : []
-    })
-
-    const selections = [...countQueries, ...singletonQueries]
-    if (selections.length === 0) return { success: true, data: {} }
-
-    const query = `query GetListCounts { ${selections.join('\n')} }`
+    const query = `query GetListCounts { ${countQueries.join('\n')} }`
     
-    const response = await keystoneClient(
-      query,
-      {},
-      {
-        next: {
-          revalidate: 60, // Cache for 1 minute since counts change frequently
-          tags: ['list-counts'],
-        },
-      }
-    )
-
-    return response
+    // Each count is independent: a list this role cannot read, or a transient failure on one list, leaves that
+    // card without a count and keeps every other count.
+    const response = await keystonePartialQuery<Record<string, any>>(query)
+    if (!response.success) return response
+    const data: Record<string, any> = {}
+    for (const [key, value] of Object.entries(response.data)) if (value !== null && value !== undefined) data[key] = value
+    return { success: true as const, data }
   } catch (error: unknown) {
-    console.error('Error fetching list counts:', safeErrorSummary(error))
+    console.error("Dashboard operation failed (details redacted).")
     const errorMessage =
-      PUBLIC_REQUEST_ERROR
+      "Could not load list counts"
     return { success: false, error: errorMessage }
   }
 }

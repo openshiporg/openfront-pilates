@@ -3,7 +3,6 @@
  * Follows Dashboard1's server-side rendering approach
  */
 
-import { PUBLIC_REQUEST_ERROR } from '@/features/dashboard/lib/security';
 import React from 'react'
 import Link from 'next/link'
 import { PlusIcon, Database } from 'lucide-react'
@@ -16,38 +15,32 @@ import { cn } from '@/lib/utils'
 interface ListCardProps {
   list: any
   count?: number | null
-  singletonItemId?: string | null
   hideCreate?: boolean
 }
 
-function ListCard({ list, count, singletonItemId = null, hideCreate = false }: ListCardProps) {
+function ListCard({ list, count, hideCreate = false }: ListCardProps) {
   const isSingleton = list.isSingleton || false
   const href = `/dashboard/${list.path}${isSingleton ? '/1' : ''}`
-  const singletonIsMissing = isSingleton && !singletonItemId
-  const cardContent = (
-    <CardContent className="p-4">
-      <h3 className="text-sm font-semibold text-foreground">
-        {list.label}
-      </h3>
-      <p className="mt-1 text-xs text-muted-foreground">
-        {isSingleton
-          ? singletonIsMissing && !hideCreate
-            ? 'Create singleton'
-            : 'Singleton'
-          : count === null || count === undefined
-            ? 'Unknown'
-            : `${count} item${count !== 1 ? 's' : ''}`
-        }
-      </p>
-    </CardContent>
-  )
 
   return (
     <Card className={cn(
-      'relative bg-gradient-to-bl from-background to-muted/80 shadow-xs',
-      !singletonIsMissing || !hideCreate ? 'hover:bg-muted transition-colors' : ''
+      'relative bg-gradient-to-bl from-background to-muted/80 shadow-xs hover:bg-muted transition-colors'
     )}>
-      {singletonIsMissing && hideCreate ? cardContent : <Link href={href}>{cardContent}</Link>}
+      <Link href={href}>
+        <CardContent className="p-4">
+          <h3 className="text-sm font-semibold text-foreground">
+            {list.label}
+          </h3>
+          <p className="mt-1 min-h-4 text-xs text-muted-foreground">
+            {isSingleton 
+              ? 'Singleton' 
+              : typeof count === 'number'
+                ? `${count} item${count !== 1 ? 's' : ''}`
+                : null
+            }
+          </p>
+        </CardContent>
+      </Link>
       
       {!hideCreate && !isSingleton && (
         <Link 
@@ -86,7 +79,7 @@ export async function HomePage() {
   const adminMetaResponse = await getAdminMetaAction()
   
   if (!adminMetaResponse.success) {
-    console.error('Failed to fetch admin meta:', PUBLIC_REQUEST_ERROR)
+    console.error('Failed to fetch admin meta:', adminMetaResponse.error)
     return (
       <PageContainer 
         title="Dashboard" 
@@ -101,10 +94,10 @@ export async function HomePage() {
   const adminMeta = adminMetaResponse.data
   const lists = adminMeta?.lists || []
   // Lists are already enhanced with gqlNames from getAdminMetaAction
-  const enhancedLists = lists.filter((list: any) => !(list.hideNavigation ?? list.isHidden))
+  const enhancedLists = lists.filter((list: any) => !list.isHidden)
 
   // Fetch list counts server-side
-  let countData: Record<string, any> = {}
+  let countData: Record<string, number> = {}
   if (enhancedLists.length > 0) {
     const countResponse = await getListCounts(enhancedLists)
     if (countResponse.success && countResponse.data) {
@@ -146,8 +139,7 @@ export async function HomePage() {
               <ListCard
                 key={list.key}
                 list={list}
-                count={typeof countData[list.key] === 'number' ? countData[list.key] : null}
-                singletonItemId={Array.isArray(countData[`singleton_${list.key}`]) ? countData[`singleton_${list.key}`][0]?.id ?? null : null}
+                count={countData[list.key] ?? null}
                 hideCreate={list.hideCreate ?? false}
               />
             ))}

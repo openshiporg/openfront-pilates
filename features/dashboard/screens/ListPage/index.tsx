@@ -4,7 +4,6 @@
  * Follows the same pattern as ItemPage
  */
 
-import { PUBLIC_REQUEST_ERROR } from '@/features/dashboard/lib/security';
 import { getListItemsAction } from '../../actions/getListItemsAction'
 import { getListByPath } from '../../actions/getListByPath'
 import { getAdminMetaAction } from '../../actions'
@@ -114,7 +113,7 @@ export async function ListPage({ params, searchParams }: PageProps) {
   if (response.success) {
     fetchedData = response.data
   } else {
-    console.error('Error fetching list items:', PUBLIC_REQUEST_ERROR)
+    console.error('Error fetching list items:', response.error)
     error = response.error
   }
 

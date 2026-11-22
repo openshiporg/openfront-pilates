@@ -1,7 +1,20 @@
 import type { NextConfig } from 'next';
+import { s3ForcePathStyle } from './features/keystone/lib/s3-storage';
+
+const s3Hostname = process.env.S3_ENDPOINT ? process.env.S3_ENDPOINT.replace(/^https?:\/\//, '').replace(/:\d+$/, '') : '/';
 
 const nextConfig: NextConfig = {
   reactCompiler: true,
+  devIndicators: false,
+  // Stripe endpoints registered before the Openfront payment-webhook path keep delivering.
+  async rewrites() {
+    return [{ source: '/api/stripe/webhook', destination: '/api/payment-webhooks/pp_stripe' }];
+  },
+  // A member opens on the shared item page; the platform path is kept so links to it still work.
+  // An HTTP redirect, not redirect() inside the streamed platform route (that swapped hook trees: React #310).
+  async redirects() {
+    return [{ source: '/dashboard/platform/members/:id', destination: '/dashboard/members/:id', permanent: false }];
+  },
   serverExternalPackages: ['graphql'],
   // Workaround since we diverged from Keystone reltionship and document views
   // typescript: {
@@ -11,7 +24,8 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: process.env.S3_ENDPOINT ? process.env.S3_ENDPOINT.replace(/^https?:\/\//, '').replace(/:\d+$/, '') : '/',
+        // Virtual-hosted buckets serve images from <bucket>.<endpoint host>
+        hostname: s3ForcePathStyle(process.env.S3_ENDPOINT) ? s3Hostname : `${process.env.S3_BUCKET_NAME}.${s3Hostname}`,
         port: '',
         pathname: '/**',
       },

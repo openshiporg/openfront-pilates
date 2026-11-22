@@ -1,0 +1,107 @@
+import { list } from '@keystone-6/core';
+import { allOperations, denyAll } from '@keystone-6/core/access';
+import {
+  text,
+  checkbox,
+  relationship,
+} from '@keystone-6/core/fields';
+
+import { isSignedIn, permissions } from '../access';
+import { tenantFilter, tenantItemAccess } from '../access/tenantPolicy';
+import { compoundUniqueDb, requiredRelationshipDb, validateTenantOwnership } from './tenantRelationships';
+import { retireUnderSchedulingLock } from '../lib/lifecycle-guards';
+
+const tenantItem = (args: any) => tenantItemAccess(args);
+import { trackingFields } from './trackingFields';
+
+export const Location = list({
+  db: { extendPrismaSchema: compoundUniqueDb("organizationId, name") },
+  hooks: {
+    async validateInput(args: any) {
+      let failed = false;
+      const addValidationError = (message: string) => { failed = true; args.addValidationError(message); };
+      await validateTenantOwnership([])({ ...args, addValidationError });
+      // Retiring a site is a deliberate transition: upcoming and in-progress services move or are
+      // cancelled first. The check and the retirement commit together under the scheduling lock.
+      if (!failed && args.operation === 'update' && args.resolvedData.isActive === false && args.item?.isActive) {
+        const problem = await retireUnderSchedulingLock(args.context, 'location', args.item);
+        if (problem) addValidationError(problem);
+      }
+    },
+    async validateDelete({ item, context, addValidationError }: any) {
+      const prisma = context.prisma as any;
+      const [schedules, instances, appointments, checkIns] = await Promise.all([
+        prisma.classSchedule.count({ where: { locationId: item.id } }),
+        prisma.classInstance.count({ where: { locationId: item.id } }),
+        prisma.appointment.count({ where: { locationId: item.id } }),
+        prisma.checkIn.count({ where: { locationId: item.id } }),
+      ]);
+      if (schedules || instances || appointments || checkIns) addValidationError('Locations with classes, appointments or visits keep their history: mark the location inactive instead of deleting it');
+    },
+  },
+  access: {
+    operation: {
+      query: isSignedIn,
+      create: permissions.canManageAllRecords,
+      update: permissions.canManageAllRecords,
+      delete: permissions.canManageAllRecords,
+    },
+    filter: { query: tenantFilter },
+    item: { update: tenantItem, delete: tenantItem },
+  },
+  ui: {
+    listView: {
+      initialColumns: ['name', 'address', 'isActive'],
+    },
+  },
+  fields: {
+    organization: relationship({
+      ref: 'Organization.locations',
+      access: { update: () => false },
+      graphql: { isNonNull: { read: true } },
+      db: { extendPrismaSchema: requiredRelationshipDb('organization') },
+      ui: { description: 'Tenant organization for this location' },
+    }),
+    name: text({
+      validation: { isRequired: true },
+      ui: {
+        description: 'Location name (e.g., Downtown Studio, West Side Branch)',
+      },
+    }),
+
+    address: text({
+      ui: {
+        displayMode: 'textarea',
+        description: 'Physical address of the location',
+      },
+    }),
+
+    phone: text({
+      ui: {
+        description: 'Location phone number',
+      },
+    }),
+
+    isActive: checkbox({
+      defaultValue: true,
+      ui: {
+        description: 'Is this location currently active?',
+      },
+    }),
+
+    resources: relationship({
+      ref: 'Room.location', many: true,
+      access: { create: denyAll, update: denyAll },
+    }),
+    instructorAvailability: relationship({
+      ref: 'InstructorAvailability.location', many: true,
+      access: { create: denyAll, update: denyAll },
+    }),
+    appointments: relationship({
+      ref: 'Appointment.location', many: true,
+      access: { create: denyAll, update: denyAll },
+    }),
+
+    ...trackingFields,
+  },
+});

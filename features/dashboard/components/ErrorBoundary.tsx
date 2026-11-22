@@ -5,11 +5,17 @@
 
 'use client'
 
-import { safeErrorSummary } from '@/features/dashboard/lib/security';
 import React, { Component, ErrorInfo, ReactNode } from 'react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { AlertTriangle } from 'lucide-react'
+
+// notFound() and redirect() signal Next through errors tagged with a digest. They are control
+// flow, not failures, and must reach Next's own boundaries (public, documented digests).
+function isNextRouterError(error: unknown): boolean {
+  const digest = (error as { digest?: unknown } | null)?.digest
+  return typeof digest === 'string' && (digest.startsWith('NEXT_REDIRECT') || digest.startsWith('NEXT_HTTP_ERROR_FALLBACK'))
+}
 
 interface Props {
   children: ReactNode
@@ -31,10 +37,16 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('Dashboard ErrorBoundary caught an error:', safeErrorSummary(error))
+    if (isNextRouterError(error)) return
+    console.error("Dashboard operation failed (details redacted).")
   }
 
   render() {
+    // notFound() and redirect() are control flow, not failures: hand them back to Next so an unknown
+    // dashboard URL shows the 404 page instead of "Something went wrong".
+    if (this.state.hasError && this.state.error && isNextRouterError(this.state.error)) {
+      throw this.state.error
+    }
     if (this.state.hasError) {
       return (
         <div className="min-h-screen flex items-center justify-center p-4">
@@ -62,7 +74,7 @@ export class ErrorBoundary extends Component<Props, State> {
               </Button>
             </div>
             
-            
+
           </div>
         </div>
       )

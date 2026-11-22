@@ -77,4 +77,3 @@ export function sanitizeDashboardRedirect(value: unknown): string {
   }
   return '/dashboard';
 }
-

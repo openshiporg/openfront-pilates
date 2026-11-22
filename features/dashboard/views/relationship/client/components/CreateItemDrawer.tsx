@@ -1,4 +1,3 @@
-import { PUBLIC_REQUEST_ERROR } from '@/features/dashboard/lib/security';
 import { useMemo } from "react";
 import useSWR from "swr";
 import { Button } from "@/components/ui/button";
@@ -115,7 +114,7 @@ export function CreateItemDrawer({ listKey, isOpen, onClose, onCreate }: CreateI
             <DrawerTitle>Error</DrawerTitle>
           </DrawerHeader>
           <div className="px-4 py-8 text-center text-red-600">
-            {error ? `Error loading ${listKey}: ${PUBLIC_REQUEST_ERROR}` : `Could not load form for ${listKey}`}
+            {`Could not load form for ${listKey}. Please try again.`}
           </div>
           <DrawerFooter>
             <Button onClick={handleCancel}>Close</Button>

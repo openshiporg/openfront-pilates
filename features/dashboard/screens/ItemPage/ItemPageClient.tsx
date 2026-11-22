@@ -6,7 +6,6 @@
 
 'use client'
 
-import { PUBLIC_REQUEST_ERROR, safeErrorSummary } from '@/features/dashboard/lib/security';
 import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQueryClient } from '@tanstack/react-query'
@@ -88,7 +87,7 @@ function DeleteButton({
           description: error.message,
           action: {
             label: 'Details',
-            onClick: () => onError(new Error(error.message || PUBLIC_REQUEST_ERROR))
+            onClick: () => onError(new Error(error.message))
           }
         })
         return
@@ -209,7 +208,7 @@ function ErrorDialog({ error, onClose }: { error: Error; onClose: () => void }) 
         <AlertDialogHeader>
           <AlertDialogTitle>Error Details</AlertDialogTitle>
           <AlertDialogDescription className="whitespace-pre-line break-words">
-            {error.message || PUBLIC_REQUEST_ERROR}
+            {error.message || 'Unable to save the item. Please try again.'}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -242,7 +241,7 @@ function deserializeItemToValue(
       // Call deserialize with the properly structured data
       result[fieldPath] = controller.deserialize(itemForField)
     } catch (error) {
-      console.error(`Error deserializing field ${fieldPath}:`, safeErrorSummary(error))
+      console.error("Dashboard operation failed (details redacted).")
     }
   })
   
@@ -329,7 +328,7 @@ export function ItemPageClient({ list, item, itemId }: ItemPageClientProps) {
           description: error.message,
           action: {
             label: 'Details',
-            onClick: () => setErrorDialogValue(new Error(error.message || PUBLIC_REQUEST_ERROR))
+            onClick: () => setErrorDialogValue(new Error(error.message))
           }
         })
         setSaveState('idle')
@@ -352,7 +351,7 @@ export function ItemPageClient({ list, item, itemId }: ItemPageClientProps) {
       })
 
     } catch (error: any) {
-      console.error('Save error:', safeErrorSummary(error))
+      console.error("Dashboard operation failed (details redacted).")
       toast.error("Unable to save item", {
         action: {
           label: "Details",
@@ -465,7 +464,7 @@ export function ItemPageClient({ list, item, itemId }: ItemPageClientProps) {
       />
       
       <div className="w-full max-w-5xl p-4 md:p-6">
-        <div className="grid lg:grid-cols-[minmax(240px,2fr)_3fr] gap-6 gap-y-8">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(240px,2fr)_3fr] gap-6 gap-y-8">
           {/* Sidebar */}
           <aside className="lg:sticky lg:top-24 lg:self-start lg:max-h-[calc(100vh-7.5rem)] flex flex-col h-full">
             <div className="space-y-6 flex-grow overflow-y-auto pb-2">
@@ -481,7 +480,7 @@ export function ItemPageClient({ list, item, itemId }: ItemPageClientProps) {
                     <div className="p-1 flex items-center gap-3">
                       <div className="flex gap-3 flex-1 min-w-0">
                         <div className="flex-shrink-0">
-                          <div className="bg-background shadow-xs border rounded-sm py-0.5 px-1 text-[.65rem] text-muted-foreground">
+                          <div className="py-0.5 text-[12px] font-medium text-muted-foreground">
                             ID
                           </div>
                         </div>
@@ -530,7 +529,7 @@ export function ItemPageClient({ list, item, itemId }: ItemPageClientProps) {
                 <AlertCircle className="h-5 w-5" />
                 <div>
                   <h2 className="font-medium">Error</h2>
-                  <p className="whitespace-pre-line break-words">{errorDialogValue.message || PUBLIC_REQUEST_ERROR}</p>
+                  <p>{errorDialogValue.message}</p>
                 </div>
               </Badge>
             )}

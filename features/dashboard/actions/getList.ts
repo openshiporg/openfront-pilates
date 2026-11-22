@@ -4,7 +4,6 @@
 
 'use server'
 
-import { safeErrorSummary } from '@/features/dashboard/lib/security';
 import { getAdminMetaAction } from './getAdminMetaAction'
 
 export async function getList(listKey: string) {
@@ -40,7 +39,7 @@ export async function getList(listKey: string) {
       fields // Return fields as a record
     }
   } catch (error) {
-    console.error('Error in getList:', safeErrorSummary(error))
+    console.error("Dashboard operation failed (details redacted).")
     return null
   }
 }

@@ -1,0 +1,414 @@
+'use client';
+
+import React, { useState } from 'react';
+import {
+  AlertCircle,
+  Dumbbell,
+  Loader2,
+  Package,
+  Building2,
+  CircleCheck,
+  ArrowUpRight,
+  Eye,
+  Pencil,
+} from 'lucide-react';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge-button';
+import { CustomSetupSteps } from './CustomSetupSteps';
+import { SectionRenderer } from './SectionRenderer';
+import { useOnboardingState } from '../hooks/useOnboardingState';
+import { useOnboardingApi } from '../hooks/useOnboardingApi';
+import type { OnboardingReadiness } from '../actions/onboarding';
+import { SECTION_DEFINITIONS } from '../config/templates';
+
+// Stripe env var hint for studio membership payments
+const PAYMENT_ENV_VARS = ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'];
+
+const StripeEnvHint = () => (
+  <TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Eye className="ml-2 h-3 w-3 cursor-help text-red-500" />
+      </TooltipTrigger>
+      <TooltipContent side="bottom" align="start" className="p-3 text-xs max-w-sm z-[100]">
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground mb-3">
+            For Stripe-backed membership billing, add these server env vars and configure monthly/annual Stripe Price IDs on each plan:
+          </p>
+          {PAYMENT_ENV_VARS.map((v) => (
+            <div key={v} className="flex items-center gap-2">
+              <code className="bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded text-xs font-mono">{v}</code>
+            </div>
+          ))}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);
+
+interface OnboardingDialogProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+function ActionButtons({
+  step,
+  isLoading,
+  runOnboarding,
+  confirmDisabled = false,
+  fullWidth = false,
+}: {
+  step: 'template' | 'progress' | 'done';
+  isLoading: boolean;
+  runOnboarding: () => void;
+  confirmDisabled?: boolean;
+  fullWidth?: boolean;
+}) {
+  return (
+    <div className="flex flex-col sm:flex-row gap-2 w-full">
+      {step === 'done' ? (
+        <>
+          <DialogClose asChild>
+            <Button type="button" variant="outline" className={fullWidth ? 'flex-1' : 'w-full sm:w-auto'}>
+              Close
+            </Button>
+          </DialogClose>
+          <Button asChild className={fullWidth ? 'flex-1' : 'w-full sm:w-auto'}>
+            <a href="/" target="_blank" rel="noopener noreferrer">
+              Preview starter site
+              <ArrowUpRight className="ml-1.5 h-4 w-4" />
+            </a>
+          </Button>
+        </>
+      ) : (
+        <>
+          <DialogClose asChild>
+            <Button type="button" variant="ghost" disabled={isLoading} className={fullWidth ? 'flex-1' : 'w-full sm:w-auto'}>
+              Cancel
+            </Button>
+          </DialogClose>
+          {isLoading ? (
+            <Button disabled className={fullWidth ? 'flex-1' : 'w-full sm:w-auto'}>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Creating...
+            </Button>
+          ) : (
+            <Button disabled={confirmDisabled} onClick={runOnboarding} className={fullWidth ? 'flex-1' : 'w-full sm:w-auto'}>
+              Confirm
+            </Button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+const recordLabels: Record<string, string> = {
+  settings: 'Store Settings', location: 'Locations', membershipTier: 'Membership plans', classType: 'Class types',
+  instructor: 'Instructors', classSchedule: 'Weekly schedules', role: 'Instructor role', paymentProvider: 'Stripe provider record',
+}
+
+const OnboardingDialog: React.FC<OnboardingDialogProps> = ({ isOpen, onClose }) => {
+  const onboardingState = useOnboardingState();
+  const {
+    step,
+    selectedTemplate,
+    currentJsonData,
+    customJsonApplied,
+    progressMessage,
+    loadingItems,
+    completedItems,
+    error,
+    itemErrors,
+    isLoading,
+    setStep,
+    setSelectedTemplate,
+    setCurrentJsonData,
+    setCustomJsonApplied,
+    setProgress,
+    setItemLoading,
+    setItemCompleted,
+    setItemError,
+    setError,
+    setIsLoading,
+    resetOnboardingState,
+  } = onboardingState;
+
+  const [readiness, setReadiness] = useState<OnboardingReadiness | null>(null);
+  const { runOnboarding } = useOnboardingApi({
+    setReadiness,
+    selectedTemplate,
+    currentJsonData,
+    completedItems,
+    setProgress,
+    setItemLoading,
+    setItemCompleted,
+    setItemError,
+    setStep,
+    setError,
+    setIsLoading,
+    resetOnboardingState,
+  });
+
+  if (!isOpen) return null;
+
+  const customNeedsConfiguration = selectedTemplate === 'custom' && !customJsonApplied;
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && !isLoading && onClose()}>
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] max-w-[95vw] flex-col overflow-hidden p-0 gap-0 sm:max-w-4xl">
+        <DialogHeader className="border-b px-4 sm:px-6 py-4 mb-0 shrink-0">
+          <DialogTitle>Studio Setup</DialogTitle>
+          <DialogDescription>
+            Choose tenant-scoped starter data, review every section, and confirm setup without creating members or financial evidence.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
+          {/* Left panel — controls + status */}
+          <div className="order-1 flex shrink-0 flex-col lg:order-none lg:w-80 lg:justify-between lg:border-r">
+            <div className="flex-1">
+              <div className="p-4 sm:p-6">
+                {/* Header */}
+                <div className="flex items-center space-x-3">
+                  <div className="inline-flex shrink-0 items-center justify-center rounded-sm bg-muted p-3">
+                    <Dumbbell className="size-5 text-foreground" aria-hidden />
+                  </div>
+                  <div className="space-y-0.5">
+                    <h3 className="text-sm font-medium text-foreground">Studio Setup</h3>
+                    <p className="text-sm text-muted-foreground">
+                      {step === 'done'
+                        ? 'Starter configuration created'
+                        : 'Create transparent, non-financial starter data'}
+                    </p>
+                  </div>
+                </div>
+                <Separator className="my-4" />
+
+                {step === 'done' ? (
+                  <>
+                    <h4 className="text-sm font-medium text-foreground mb-2">{readiness?.ready ? 'Setup complete' : 'Starter records created'}</h4>
+                    {readiness && !readiness.ready ? <p className="mb-3 text-sm text-muted-foreground">Finish the required steps below before taking members.</p> : null}
+                    {readiness ? (
+                      <ul className="mb-4 space-y-1.5 text-sm" aria-label="Setup checklist">
+                        {readiness.steps.map((item) => (
+                          <li key={item.key} className="flex items-start gap-2">
+                            <CircleCheck className={item.done ? 'mt-0.5 h-4 w-4 shrink-0 fill-emerald-500 text-background' : 'mt-0.5 h-4 w-4 shrink-0 fill-muted text-muted-foreground'} aria-hidden />
+                            <span className={item.done ? 'text-muted-foreground' : 'text-foreground'}>
+                              {item.done ? item.label : <a href={item.href} className="underline underline-offset-2">{item.label}</a>}
+                              {!item.done && item.kind === 'optional' ? ' (optional)' : ''}
+                              {!item.done && item.kind === 'first-use' ? ' (starts with real use)' : ''}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {readiness?.records ? (
+                      <div className="space-y-1.5 text-sm text-muted-foreground" aria-label="What setup did">
+                        {Object.entries(recordLabels).map(([kind, label]) => {
+                          const created = readiness.records?.created[kind] ?? 0
+                          const kept = readiness.records?.adopted[kind] ?? 0
+                          if (!created && !kept) return null
+                          return <p key={kind}>{label}: {created} created{kept ? `, ${kept} kept from your existing setup` : ''}</p>
+                        })}
+                        {readiness.records.missing.length ? <p className="text-amber-700 dark:text-amber-400">{readiness.records.missing.length} setup record{readiness.records.missing.length === 1 ? ' is' : 's are'} no longer present.</p> : null}
+                        <p>Sample instructors have reserved placeholder emails and can&apos;t sign in. Replace sample business details before publishing. No payments, subscriptions or charges were created.</p>
+                        <StripeEnvHint />
+                      </div>
+                    ) : null}
+                  </>
+                ) : !isLoading ? (
+                  <>
+                    <h4 className="text-sm font-medium text-foreground mb-4">Setup Type</h4>
+
+                    {/* Mobile: Dropdown */}
+                    <div className="block lg:hidden">
+                      <Select
+                        value={selectedTemplate}
+                        onValueChange={(value) => setSelectedTemplate(value as 'minimal' | 'full' | 'custom')}
+                      >
+                        <SelectTrigger className="w-full h-auto py-3">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="minimal">
+                            <div className="flex flex-col items-start text-left">
+                              <span className="font-medium">Basic Setup</span>
+                              <span className="text-xs text-muted-foreground">One plan, one class, one instructor, recurring schedules</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="full">
+                            <div className="flex flex-col items-start text-left">
+                              <span className="font-medium">Complete Setup</span>
+                              <span className="text-xs text-muted-foreground">Sample plans, classes, instructors, and schedules; no member or financial records</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="custom">
+                            <div className="flex flex-col items-start text-left">
+                              <span className="font-medium">Custom Setup</span>
+                              <span className="text-xs text-muted-foreground">Validate your own supported Studio configuration</span>
+                            </div>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Desktop: Radio Group */}
+                    <div className="hidden lg:block">
+                      <RadioGroup
+                        value={selectedTemplate}
+                        onValueChange={(value) => setSelectedTemplate(value as 'minimal' | 'full' | 'custom')}
+                        className="space-y-4"
+                      >
+                        {[
+                          {
+                            value: 'minimal' as const,
+                            icon: Package,
+                            label: 'Basic Setup',
+                            desc: 'One plan, one class, one instructor, recurring schedules',
+                          },
+                          {
+                            value: 'full' as const,
+                            icon: Building2,
+                            label: 'Complete Starter Setup',
+                            desc: 'Sample plans, classes, instructors, and schedules; no member or financial records',
+                          },
+                          {
+                            value: 'custom' as const,
+                            icon: Pencil,
+                            label: 'Custom Setup',
+                            desc: 'Validate your own supported Studio configuration',
+                          },
+                        ].map(({ value, icon: Icon, label, desc }) => (
+                          <div
+                            key={value}
+                            className={`border p-4 rounded-md transition-colors cursor-pointer ${
+                              selectedTemplate === value
+                                ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                                : 'hover:border-blue-200'
+                            }`}
+                            onClick={() => setSelectedTemplate(value)}
+                          >
+                            <div className="flex gap-4">
+                              <div className="flex-shrink-0 mt-[3px]">
+                                <Icon
+                                  className={`h-5 w-5 ${
+                                    selectedTemplate === value
+                                      ? 'text-blue-600 dark:text-blue-400'
+                                      : 'text-muted-foreground'
+                                  }`}
+                                />
+                              </div>
+                              <div className="flex-1">
+                                <RadioGroupItem value={value} id={value} className="sr-only" />
+                                <Label htmlFor={value} className="flex-1 cursor-pointer">
+                                  <div className="font-medium text-base mb-1">{label}</div>
+                                  <div className="text-sm text-muted-foreground">{desc}</div>
+                                </Label>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </RadioGroup>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <h4 className="text-sm font-medium text-foreground">
+                      Creating {selectedTemplate === 'minimal' ? 'Basic' : selectedTemplate === 'full' ? 'Complete' : 'Custom'} Setup
+                    </h4>
+                    <p className="mt-1 text-sm leading-6 text-muted-foreground">{progressMessage}</p>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Desktop buttons */}
+            <div className="hidden lg:flex flex-col border-t mt-auto">
+              {error && !isLoading && step !== 'done' && (
+                <Badge color="rose" className="rounded-none gap-3 text-sm border-b">
+                  <AlertCircle className="size-4 sm:size-7" />
+                  <span className="text-xs sm:text-sm">{error}</span>
+                </Badge>
+              )}
+              <div className="flex items-center justify-between p-4">
+                <ActionButtons step={step} isLoading={isLoading} runOnboarding={runOnboarding} confirmDisabled={customNeedsConfiguration} />
+              </div>
+            </div>
+          </div>
+
+          {/* Right panel — section renderer */}
+          <div className="order-2 min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:order-none">
+            {customNeedsConfiguration && step === 'template' ? (
+              <CustomSetupSteps
+                currentJson={currentJsonData}
+                onJsonUpdate={(data) => {
+                  setCurrentJsonData(data);
+                  setCustomJsonApplied(true);
+                }}
+              />
+            ) : (
+              <>
+                {selectedTemplate === 'custom' && step === 'template' && customJsonApplied && (
+                  <Button type="button" variant="ghost" size="sm" className="mb-4" onClick={() => setCustomJsonApplied(false)}>
+                    <Pencil className="mr-2 size-4" />
+                    Edit custom setup
+                  </Button>
+                )}
+                <SectionRenderer
+                  sections={SECTION_DEFINITIONS}
+                  selectedTemplate={selectedTemplate}
+                  isLoading={isLoading}
+                  loadingItems={loadingItems}
+                  completedItems={completedItems}
+                  itemErrors={itemErrors}
+                  error={error}
+                  step={step}
+                  currentJsonData={currentJsonData}
+                />
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Mobile buttons */}
+        <div className="flex shrink-0 flex-col border-t lg:hidden">
+          {error && !isLoading && step !== 'done' && (
+            <Badge color="rose" className="rounded-none gap-3 text-sm border-b">
+              <AlertCircle className="size-4 sm:size-7" />
+              <span className="text-xs sm:text-sm">{error}</span>
+            </Badge>
+          )}
+          <div className="flex items-center justify-between p-4">
+            <ActionButtons step={step} isLoading={isLoading} runOnboarding={runOnboarding} confirmDisabled={customNeedsConfiguration} fullWidth />
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+export default OnboardingDialog;

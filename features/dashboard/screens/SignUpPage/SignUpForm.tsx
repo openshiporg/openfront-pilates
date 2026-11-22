@@ -18,6 +18,7 @@ type ActionState = {
   message: string | null;
   formData: {
     email: string;
+
   };
 };
 
@@ -25,6 +26,7 @@ const initialState: ActionState = {
   message: null,
   formData: {
     email: "",
+
   },
 };
 
@@ -103,6 +105,7 @@ export function SignUpForm() {
                 autoComplete="new-password"
                 placeholder="••••••••"
                 className="pr-10 bg-muted/40"
+
                 required
               />
               <button

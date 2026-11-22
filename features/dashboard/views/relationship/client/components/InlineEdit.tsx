@@ -1,6 +1,5 @@
 "use client";
 
-import { safeErrorSummary } from '@/features/dashboard/lib/security';
 import React, { useState, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -41,7 +40,7 @@ function deserializeItemToValue(
       // Call deserialize with the properly structured data
       result[fieldPath] = controller.deserialize(itemForField);
     } catch (error) {
-      console.error(`Error deserializing field ${fieldPath}:`, safeErrorSummary(error));
+      console.error("Dashboard operation failed (details redacted).");
     }
   });
 
